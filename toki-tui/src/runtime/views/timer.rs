@@ -95,7 +95,11 @@ pub(super) fn handle_timer_key(key: KeyEvent, app: &mut App, action_tx: &ActionT
                     app.entry_edit_backspace();
                 }
             } else if is_persisted_today_row_selected(app) {
-                app.enter_delete_confirm(app::DeleteOrigin::Timer);
+                if app.focused_this_week_entry_is_locked() {
+                    app.set_locked_delete_status();
+                } else {
+                    app.enter_delete_confirm(app::DeleteOrigin::Timer);
+                }
             }
         }
         KeyCode::Esc => {
@@ -123,7 +127,11 @@ pub(super) fn handle_timer_key(key: KeyEvent, app: &mut App, action_tx: &ActionT
             handle_ctrl_x_key(app, action_tx);
         }
         KeyCode::Delete if !is_editing_this_week(app) && is_persisted_today_row_selected(app) => {
-            app.enter_delete_confirm(app::DeleteOrigin::Timer);
+            if app.focused_this_week_entry_is_locked() {
+                app.set_locked_delete_status();
+            } else {
+                app.enter_delete_confirm(app::DeleteOrigin::Timer);
+            }
         }
         KeyCode::Char('z') | KeyCode::Char('Z') => app.toggle_zen_mode(),
         _ => {}
@@ -233,7 +241,11 @@ fn handle_ctrl_x_key(app: &mut App, action_tx: &ActionTx) {
     }
 
     if is_persisted_today_row_selected(app) {
-        app.enter_delete_confirm(app::DeleteOrigin::Timer);
+        if app.focused_this_week_entry_is_locked() {
+            app.set_locked_delete_status();
+        } else {
+            app.enter_delete_confirm(app::DeleteOrigin::Timer);
+        }
         return;
     }
 
