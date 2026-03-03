@@ -95,6 +95,42 @@ git_default_prefix = "Development"
 task_filter = "+work"
 ```
 
+## Releasing
+
+### Branch strategy
+
+```
+upstream/master → master (sync only, never tagged)
+feature/* / fix/* → next  (integration, disposable)
+next → release/v0.3       (stable snapshot, tags live here)
+```
+
+- `master` tracks upstream. Never tag it, never develop on it.
+- `next` is the integration branch — rebase and force-push freely.
+- `release/vMAJOR.MINOR` is a stable snapshot cut from `next`. Tags (`v0.3.0`, `v0.3.1`, ...) go here.
+
+### New minor release (e.g. v0.3.0)
+
+```bash
+git checkout next
+git checkout -b release/v0.3
+git tag v0.3.0
+git push origin release/v0.3 --tags
+```
+
+### Patch release (e.g. v0.3.1)
+
+```bash
+git checkout release/v0.3
+# cherry-pick fixes from next if needed
+git tag v0.3.1
+git push origin release/v0.3 --tags
+```
+
+GitHub Actions builds binaries for all 5 platforms and creates a GitHub Release automatically when a `v*` tag is pushed.
+
+> Never tag `next` or `master`. Tags only go on `release/v*` branches.
+
 ## Log notes
 
 Attach a freeform markdown log file to any time entry. Log files are stored in `~/.local/share/toki-tui/logs/` and linked to entries via a tag embedded in the note (`[log:XXXXXX]`). The tag is hidden in all display locations — only the clean summary is shown.
