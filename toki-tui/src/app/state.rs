@@ -558,4 +558,37 @@ mod tests {
         // "hälsningar" = 10 chars, 11 bytes (ä is 2 bytes)
         assert_eq!(before.chars().count(), 10); // column = 10, not stripped.len() (11)
     }
+
+    #[test]
+    fn text_input_move_word_left_swedish() {
+        let mut ti = TextInput::from_str("hej världen");
+        // "hej världen" — ä in "världen" is 2 bytes, total = 12 bytes, 11 chars
+        // cursor starts at end: byte offset 12, char offset 11 (they differ because of ä)
+        assert_eq!(ti.value.len(), 12);
+        assert_eq!(ti.char_cursor(), 11); // byte offset != char offset here
+        ti.move_word_left(); // step1: no leading whitespace; step2: skip "världen" → byte 4
+        assert_eq!(&ti.value[..ti.cursor], "hej ");
+        assert_eq!(ti.char_cursor(), 4);
+        ti.move_word_left(); // step1: skip space; step2: skip "hej" → byte 0
+        assert_eq!(ti.cursor, 0);
+    }
+
+    #[test]
+    fn text_input_insert_and_delete_swedish() {
+        let mut ti = TextInput::default();
+        ti.insert('ö');
+        ti.insert('l');
+        ti.insert('a');
+        assert_eq!(ti.value, "öla");
+        // byte cursor after "öla": ö=2, l=1, a=1 = 4 bytes
+        assert_eq!(ti.cursor, "öla".len());
+        assert_eq!(ti.char_cursor(), 3);
+        ti.backspace(); // delete 'a'
+        assert_eq!(ti.value, "öl");
+        ti.backspace(); // delete 'l'
+        assert_eq!(ti.value, "ö");
+        ti.backspace(); // delete 'ö'
+        assert_eq!(ti.value, "");
+        assert_eq!(ti.cursor, 0);
+    }
 }
