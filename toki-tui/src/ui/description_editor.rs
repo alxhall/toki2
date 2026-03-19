@@ -36,8 +36,8 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
                     .padding(Padding::horizontal(1)),
             );
         frame.render_widget(input, chunks[0]);
-        // Place terminal cursor: border(1) + padding(1) + char offset
-        let cx = chunks[0].x + 2 + before.chars().count() as u16;
+        // Place terminal cursor: border(1) + padding(1) + char offset (not byte offset)
+        let cx = chunks[0].x + 2 + cwd_input.char_cursor() as u16;
         let cy = chunks[0].y + 1;
         frame.set_cursor_position((cx, cy));
     } else {
