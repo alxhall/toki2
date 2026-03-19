@@ -308,6 +308,13 @@ impl TextInput {
         (&self.value[..self.cursor], &self.value[self.cursor..])
     }
 
+    /// Returns the number of Unicode scalar values before the cursor.
+    /// Use this for terminal rendering (column position), not `self.cursor`
+    /// which is a UTF-8 byte offset.
+    pub fn char_cursor(&self) -> usize {
+        self.value[..self.cursor].chars().count()
+    }
+
     fn prev_boundary(&self, pos: usize) -> usize {
         debug_assert!(pos > 0, "prev_boundary called with pos == 0");
         let mut p = pos;
@@ -466,6 +473,122 @@ mod tests {
         ti.cursor = 0;
         ti.delete_word_back(); // no-op
         assert_eq!(ti.value, "hello");
+        assert_eq!(ti.cursor, 0);
+    }
+
+    #[test]
+    fn text_input_char_cursor_multibyte() {
+        // "öhej" — ö is 2 bytes, so after typing ö cursor byte offset = 2, char offset = 1
+        let mut ti = TextInput::from_str("öhej");
+        ti.cursor = 0; // start: both offsets = 0
+        assert_eq!(ti.char_cursor(), 0);
+
+        ti.cursor = "ö".len(); // byte offset 2
+        assert_eq!(ti.char_cursor(), 1); // char offset 1
+
+        ti.cursor = "öh".len(); // byte offset 3
+        assert_eq!(ti.char_cursor(), 2);
+
+        // ASCII: byte offset == char offset
+        let mut ti2 = TextInput::from_str("hello");
+        ti2.cursor = 3;
+        assert_eq!(ti2.char_cursor(), 3);
+        ti2.cursor = ti2.value.len();
+        assert_eq!(ti2.char_cursor(), 5);
+    }
+
+    #[test]
+    fn text_input_char_cursor_emoji() {
+        // 😀 is 4 bytes, char offset 1
+        let mut ti = TextInput::from_str("😀x");
+        ti.cursor = "😀".len(); // byte 4
+        assert_eq!(ti.char_cursor(), 1);
+    }
+
+    #[test]
+    fn text_input_split_at_cursor_multibyte_columns() {
+        let mut ti = TextInput::from_str("åäö test");
+        // cursor after "åä" — each is 2 bytes, so byte offset = 4
+        ti.cursor = "åä".len(); // 4 bytes
+        let (before, after) = ti.split_at_cursor();
+        assert_eq!(before, "åä");
+        assert_eq!(after, "ö test");
+        // column for rendering = char count of before
+        assert_eq!(before.chars().count(), 2); // NOT 4
+    }
+
+    /// Simulate the clamping logic from description_editor.rs when cursor sits past the
+    /// stripped string (e.g. cursor was at end of raw value including a log tag that was
+    /// stripped away for display).
+    #[test]
+    fn description_editor_cursor_clamped_past_stripped_string() {
+        // Simulate: raw = "note text [log:abc123]", cursor at raw.len()
+        // After strip_tag: stripped = "note text" (tag + trailing space removed)
+        let raw = "note text [log:abc123]";
+        let stripped = "note text"; // what strip_tag returns
+        let cursor = raw.len(); // cursor at end of raw — past end of stripped
+
+        // This is the clamping logic from description_editor.rs:
+        let stripped_cursor = cursor.min(stripped.len());
+        let stripped_cursor = (0..=stripped_cursor)
+            .rev()
+            .find(|&i| stripped.is_char_boundary(i))
+            .unwrap_or(0);
+
+        let before = &stripped[..stripped_cursor];
+        assert_eq!(before, "note text"); // cursor clamped to end of stripped
+        assert_eq!(before.chars().count(), 9); // column = 9, not raw.len() (22)
+    }
+
+    /// Same as above but with multibyte chars in the note, cursor past stripped end.
+    #[test]
+    fn description_editor_cursor_clamped_multibyte_with_log_tag() {
+        let raw = "hälsningar [log:abc123]";
+        let stripped = "hälsningar"; // strip_tag result; "ä" = 2 bytes
+        let cursor = raw.len(); // past end of stripped
+
+        let stripped_cursor = cursor.min(stripped.len());
+        let stripped_cursor = (0..=stripped_cursor)
+            .rev()
+            .find(|&i| stripped.is_char_boundary(i))
+            .unwrap_or(0);
+
+        let before = &stripped[..stripped_cursor];
+        assert_eq!(before, "hälsningar");
+        // "hälsningar" = 10 chars, 11 bytes (ä is 2 bytes)
+        assert_eq!(before.chars().count(), 10); // column = 10, not stripped.len() (11)
+    }
+
+    #[test]
+    fn text_input_move_word_left_swedish() {
+        let mut ti = TextInput::from_str("hej världen");
+        // "hej världen" — ä in "världen" is 2 bytes, total = 12 bytes, 11 chars
+        // cursor starts at end: byte offset 12, char offset 11 (they differ because of ä)
+        assert_eq!(ti.value.len(), 12);
+        assert_eq!(ti.char_cursor(), 11); // byte offset != char offset here
+        ti.move_word_left(); // step1: no leading whitespace; step2: skip "världen" → byte 4
+        assert_eq!(&ti.value[..ti.cursor], "hej ");
+        assert_eq!(ti.char_cursor(), 4);
+        ti.move_word_left(); // step1: skip space; step2: skip "hej" → byte 0
+        assert_eq!(ti.cursor, 0);
+    }
+
+    #[test]
+    fn text_input_insert_and_delete_swedish() {
+        let mut ti = TextInput::default();
+        ti.insert('ö');
+        ti.insert('l');
+        ti.insert('a');
+        assert_eq!(ti.value, "öla");
+        // byte cursor after "öla": ö=2, l=1, a=1 = 4 bytes
+        assert_eq!(ti.cursor, "öla".len());
+        assert_eq!(ti.char_cursor(), 3);
+        ti.backspace(); // delete 'a'
+        assert_eq!(ti.value, "öl");
+        ti.backspace(); // delete 'l'
+        assert_eq!(ti.value, "ö");
+        ti.backspace(); // delete 'ö'
+        assert_eq!(ti.value, "");
         assert_eq!(ti.cursor, 0);
     }
 }

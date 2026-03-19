@@ -36,8 +36,8 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
                     .padding(Padding::horizontal(1)),
             );
         frame.render_widget(input, chunks[0]);
-        // Place terminal cursor: border(1) + padding(1) + char offset
-        let cx = chunks[0].x + 2 + before.chars().count() as u16;
+        // Place terminal cursor: border(1) + padding(1) + char offset (not byte offset)
+        let cx = chunks[0].x + 2 + cwd_input.char_cursor() as u16;
         let cy = chunks[0].y + 1;
         frame.set_cursor_position((cx, cy));
     } else {
@@ -45,10 +45,17 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
         // The raw value (including tag) is preserved in app.description_input.value.
         let raw = &app.description_input.value;
         let stripped = log_notes::strip_tag(raw);
-        // Compute cursor position in the stripped view (capped at stripped length)
-        let cursor = app.description_input.cursor.min(stripped.chars().count());
-        let before: String = stripped.chars().take(cursor).collect();
-        let after: String = stripped.chars().skip(cursor).collect();
+
+        // Clamp cursor to a valid char boundary within the stripped string.
+        // Use byte slicing (not chars) so that byte→column conversion is correct
+        // for multibyte characters (e.g. å, ä, ö, emoji).
+        let stripped_cursor = app.description_input.cursor.min(stripped.len());
+        let stripped_cursor = (0..=stripped_cursor)
+            .rev()
+            .find(|&i| stripped.is_char_boundary(i))
+            .unwrap_or(0);
+        let before = &stripped[..stripped_cursor];
+        let after = &stripped[stripped_cursor..];
         let input_text = format!("{}{}", before, after);
         let input = Paragraph::new(input_text)
             .style(Style::default().fg(Color::White))
@@ -59,8 +66,9 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
                     .padding(Padding::horizontal(1)),
             );
         frame.render_widget(input, chunks[0]);
-        // Place terminal cursor: border(1) + padding(1) + char offset
-        let cx = chunks[0].x + 2 + cursor as u16;
+        // Place terminal cursor: border(1) + padding(1) + char column (NOT byte offset)
+        let col = before.chars().count() as u16;
+        let cx = chunks[0].x + 2 + col;
         let cy = chunks[0].y + 1;
         frame.set_cursor_position((cx, cy));
     }
