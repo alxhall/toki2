@@ -504,4 +504,58 @@ mod tests {
         ti.cursor = "😀".len(); // byte 4
         assert_eq!(ti.char_cursor(), 1);
     }
+
+    #[test]
+    fn text_input_split_at_cursor_multibyte_columns() {
+        let mut ti = TextInput::from_str("åäö test");
+        // cursor after "åä" — each is 2 bytes, so byte offset = 4
+        ti.cursor = "åä".len(); // 4 bytes
+        let (before, after) = ti.split_at_cursor();
+        assert_eq!(before, "åä");
+        assert_eq!(after, "ö test");
+        // column for rendering = char count of before
+        assert_eq!(before.chars().count(), 2); // NOT 4
+    }
+
+    /// Simulate the clamping logic from description_editor.rs when cursor sits past the
+    /// stripped string (e.g. cursor was at end of raw value including a log tag that was
+    /// stripped away for display).
+    #[test]
+    fn description_editor_cursor_clamped_past_stripped_string() {
+        // Simulate: raw = "note text [log:abc123]", cursor at raw.len()
+        // After strip_tag: stripped = "note text" (tag + trailing space removed)
+        let raw = "note text [log:abc123]";
+        let stripped = "note text"; // what strip_tag returns
+        let cursor = raw.len(); // cursor at end of raw — past end of stripped
+
+        // This is the clamping logic from description_editor.rs:
+        let stripped_cursor = cursor.min(stripped.len());
+        let stripped_cursor = (0..=stripped_cursor)
+            .rev()
+            .find(|&i| stripped.is_char_boundary(i))
+            .unwrap_or(0);
+
+        let before = &stripped[..stripped_cursor];
+        assert_eq!(before, "note text"); // cursor clamped to end of stripped
+        assert_eq!(before.chars().count(), 9); // column = 9, not raw.len() (22)
+    }
+
+    /// Same as above but with multibyte chars in the note, cursor past stripped end.
+    #[test]
+    fn description_editor_cursor_clamped_multibyte_with_log_tag() {
+        let raw = "hälsningar [log:abc123]";
+        let stripped = "hälsningar"; // strip_tag result; "ä" = 2 bytes
+        let cursor = raw.len(); // past end of stripped
+
+        let stripped_cursor = cursor.min(stripped.len());
+        let stripped_cursor = (0..=stripped_cursor)
+            .rev()
+            .find(|&i| stripped.is_char_boundary(i))
+            .unwrap_or(0);
+
+        let before = &stripped[..stripped_cursor];
+        assert_eq!(before, "hälsningar");
+        // "hälsningar" = 10 chars, 11 bytes (ä is 2 bytes)
+        assert_eq!(before.chars().count(), 10); // column = 10, not stripped.len() (11)
+    }
 }
