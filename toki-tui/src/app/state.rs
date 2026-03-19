@@ -308,6 +308,13 @@ impl TextInput {
         (&self.value[..self.cursor], &self.value[self.cursor..])
     }
 
+    /// Returns the number of Unicode scalar values before the cursor.
+    /// Use this for terminal rendering (column position), not `self.cursor`
+    /// which is a UTF-8 byte offset.
+    pub fn char_cursor(&self) -> usize {
+        self.value[..self.cursor].chars().count()
+    }
+
     fn prev_boundary(&self, pos: usize) -> usize {
         debug_assert!(pos > 0, "prev_boundary called with pos == 0");
         let mut p = pos;
@@ -467,5 +474,34 @@ mod tests {
         ti.delete_word_back(); // no-op
         assert_eq!(ti.value, "hello");
         assert_eq!(ti.cursor, 0);
+    }
+
+    #[test]
+    fn text_input_char_cursor_multibyte() {
+        // "öhej" — ö is 2 bytes, so after typing ö cursor byte offset = 2, char offset = 1
+        let mut ti = TextInput::from_str("öhej");
+        ti.cursor = 0; // start: both offsets = 0
+        assert_eq!(ti.char_cursor(), 0);
+
+        ti.cursor = "ö".len(); // byte offset 2
+        assert_eq!(ti.char_cursor(), 1); // char offset 1
+
+        ti.cursor = "öh".len(); // byte offset 3
+        assert_eq!(ti.char_cursor(), 2);
+
+        // ASCII: byte offset == char offset
+        let mut ti2 = TextInput::from_str("hello");
+        ti2.cursor = 3;
+        assert_eq!(ti2.char_cursor(), 3);
+        ti2.cursor = ti2.value.len();
+        assert_eq!(ti2.char_cursor(), 5);
+    }
+
+    #[test]
+    fn text_input_char_cursor_emoji() {
+        // 😀 is 4 bytes, char offset 1
+        let mut ti = TextInput::from_str("😀x");
+        ti.cursor = "😀".len(); // byte 4
+        assert_eq!(ti.char_cursor(), 1);
     }
 }
