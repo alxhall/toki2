@@ -47,11 +47,9 @@ Permanent notes for Toki's Kleer time-tracking integration. Read this before cha
 - Partial unique indexes enforce one active mapping per `(user_id, provider)` and one active mapped local user per `(provider, provider_company_id, provider_user_id)`.
 - Admin-only endpoints live under `/time-tracking/admin`:
   - `POST /kleer-users/import`
-  - `POST /kleer-users/link-by-email`
   - `GET /kleer-users`
   - `PUT /user-links`
   - `DELETE /user-links/{userId}`
-- Email matching only links active, imported Kleer users when the normalized email has exactly one unmapped Toki user and exactly one unmapped Kleer user. It does not overwrite existing manual mappings.
 
 ## Kleer Endpoints Used
 
@@ -59,7 +57,6 @@ Permanent notes for Toki's Kleer time-tracking integration. Read this before cha
 - `GET /company/{companyId}/user`
 - `GET /company/{companyId}/user/{userId}`
 - `GET /company/{companyId}/user/foreign-id/{foreignId}`
-- `GET /company/{companyId}/client-project`
 - `GET /company/{companyId}/client-project?filter=active`
 - `GET /company/{companyId}/activity`
 - `GET /company/{companyId}/event`
@@ -68,7 +65,6 @@ Permanent notes for Toki's Kleer time-tracking integration. Read this before cha
 - `POST /company/{companyId}/event/{eventId}`
 - `DELETE /company/{companyId}/event/{eventId}`
 - `GET /company/{companyId}/event/statuses`
-- `GET /company/{companyId}/payroll/user/{userId}/event/from/{fromDate}/to/{toDate}`
 - `GET /company/{companyId}/payroll/user/{userId}/schedule/{startDate}/to/{endDate}`
 
 ## Events, Statuses, And Stats
@@ -79,19 +75,11 @@ Permanent notes for Toki's Kleer time-tracking integration. Read this before cha
   - `Approved` -> `approved`
   - `Certified` -> `certified`
 - Only `open` entries are editable. `approved` and `certified` entries are locked.
-- `GET /event/statuses` exposes date-level statuses even when no event from the current Toki view is present. Use it to gate create/edit attempts before calling `PUT /event`.
-  - Live validation on 2026-05-09: Pontus Backman (`131486`) on `2026-05-01` returned `APPROVED`; Martin Liljeberg (`129583`) returned `OPEN` after manually reopening `2026-05-09`.
-- Weekly stats expose:
+- Weekly stats expose only:
   - `workedHours`
   - `scheduledHours`
   - `remainingHours`
-- Weekly stats also expose estimated Kleer period flex fields:
-  - `absenceHours`
-  - `coveredHours`
-  - `periodFlexHours`
-- Kleer support confirmed on 2026-04-27 that flex balance is not directly available through the API. Toki estimates period flex as `coveredHours - scheduledHours`, where `coveredHours = workedHours + absenceHours`.
-- `periodFlexHours` is a selected-period estimate, not Kleer's stored historical flex balance and not Milltime's previous `FlexTimeCurrent` equivalent.
-- Absence hours come from payroll events. Count leave/absence payroll event types as schedule-covering hours, but do not count `WorkHour` as absence to avoid double-counting normal project time.
+- Do not synthesize flex or komptid values until Kleer has a confirmed balance endpoint.
 - Weekly scheduled hours come from the payroll schedule endpoint. Use `actual-hours` from `payroll-user-schedule-metadatas`; it accounts for employment rate and bank holidays.
 
 ## Project And Activity Rules

@@ -2,13 +2,11 @@ import React, { useMemo, useState } from "react";
 import dayjs from "dayjs";
 import {
   TimeEntry,
-  timeTrackingQueries,
   type TimeEntryStatus,
 } from "@/lib/api/queries/time-tracking";
 import { cn, formatHoursAsHoursMinutes } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { timeTrackingMutations } from "@/lib/api/mutations/time-tracking";
-import { apiErrorToast } from "@/lib/api/errors";
 import { useTimeTrackingTimer } from "@/hooks/useTimeTrackingStore";
 import { toast } from "sonner";
 import {
@@ -29,7 +27,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { TimeEntryEditContent } from "./time-entry-edit-content";
-import { useQueryClient } from "@tanstack/react-query";
 
 type MergedTimeEntry = Omit<TimeEntry, "startTime" | "endTime"> & {
   timePeriods: Array<{
@@ -293,7 +290,7 @@ const StartAgainButton = React.memo(function StartAgainButton(props: {
         activityName: props.activityName,
       })
         .then(() => toast.success("Timer updated"))
-        .catch(apiErrorToast("Failed to update timer"));
+        .catch(() => toast.error("Failed to update timer"));
       return;
     }
 
@@ -307,7 +304,7 @@ const StartAgainButton = React.memo(function StartAgainButton(props: {
         })
       )
       .then(() => toast.success("Timer started"))
-      .catch(apiErrorToast("Failed to start timer"));
+      .catch(() => toast.error("Failed to start timer"));
   };
 
   return (
@@ -335,7 +332,6 @@ function ViewEntryCard(props: {
   projectColor?: string;
   ProjectIcon?: LucideIcon;
 }) {
-  const queryClient = useQueryClient();
   const entry = props.entry;
   const isMerged = isMergedTimeEntry(entry);
   const mergedPeriodsWithTimes = isMerged
@@ -506,16 +502,6 @@ function ViewEntryCard(props: {
                           variant="ghost"
                           size="sm"
                           onClick={props.onEdit}
-                          onMouseEnter={() => {
-                            void queryClient.prefetchQuery(
-                              timeTrackingQueries.listActivities(entry.projectId),
-                            );
-                          }}
-                          onFocus={() => {
-                            void queryClient.prefetchQuery(
-                              timeTrackingQueries.listActivities(entry.projectId),
-                            );
-                          }}
                           disabled={isMerged && entry.timePeriods.length > 1}
                           className="h-7 w-7 rounded-md p-0 hover:bg-primary/10 hover:text-primary"
                         >

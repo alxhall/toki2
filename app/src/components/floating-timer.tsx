@@ -5,7 +5,6 @@ import {
   CalendarClockIcon,
   EditIcon,
   Minimize2Icon,
-  PiggyBankIcon,
   SaveIcon,
   Trash2Icon,
   WatchIcon,
@@ -15,7 +14,6 @@ import { cn, formatHoursMinutes } from "@/lib/utils";
 import { timeTrackingQueries } from "@/lib/api/queries/time-tracking";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { timeTrackingMutations } from "@/lib/api/mutations/time-tracking";
-import { apiErrorToast } from "@/lib/api/errors";
 import dayjs from "dayjs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
@@ -96,6 +94,7 @@ export const FloatingTimer = () => {
     };
   }, [rememberLastProject, timer]);
 
+  const { mutate: startTimer } = timeTrackingMutations.useStartTimer();
   const { mutate: stopTimer, isPending: isStoppingTimer } =
     timeTrackingMutations.useStopTimer({
       onSuccess: () => {
@@ -103,14 +102,14 @@ export const FloatingTimer = () => {
       },
     });
   const { mutate: saveTimer, isPending: isSavingTimer } =
-    timeTrackingMutations.useSaveTimer({
-      onError: apiErrorToast("Failed to save timer"),
-    });
+    timeTrackingMutations.useSaveTimer();
   const { mutate: editTimer } = timeTrackingMutations.useEditTimer({
     onSuccess: () => {
       toast.success("Timer successfully updated");
     },
-    onError: apiErrorToast("Failed to update timer"),
+    onError: () => {
+      toast.error(`Failed to update timer, try refreshing the page`);
+    },
   });
 
   // Store the start time
@@ -149,20 +148,18 @@ export const FloatingTimer = () => {
       saveTimer(
         {
           userNote: note,
-          restartTimer: shouldAutoRestart
-            ? {
-                userNote: CONTINUING_MY_WORK_NOTE,
-                ...restartTimerParams,
-              }
-            : undefined,
         },
         {
           onSuccess: () => {
             toast.success("Timer successfully saved");
-            if (!shouldAutoRestart) {
-              removeSegment("timer");
-            }
+            removeSegment("timer");
             rememberCurrentTimerSelection();
+            if (shouldAutoRestart) {
+              startTimer({
+                userNote: CONTINUING_MY_WORK_NOTE,
+                ...restartTimerParams,
+              });
+            }
           },
         },
       );
@@ -172,6 +169,7 @@ export const FloatingTimer = () => {
       rememberCurrentTimerSelection,
       restartTimerParams,
       saveTimer,
+      startTimer,
       timer,
     ],
   );
@@ -511,22 +509,13 @@ function TimeSummary(props: {
 
   const timeLeft =
     timeInfo.remainingHours - (props.timerHours + props.timerMinutes / 60);
-  const flexTime =
-    timeInfo.periodFlexHours + props.timerHours + props.timerMinutes / 60;
-  const flexLabel = `${flexTime > 0 ? "+" : ""}${formatHoursMinutes(flexTime)}`;
-  const flexColor =
-    flexTime > 0
-      ? "text-emerald-500"
-      : flexTime < 0
-        ? "text-amber-500"
-        : undefined;
 
   const {
     hours: timeTodayHours,
     minutes: timeTodayMinutes,
     seconds: timeTodaySeconds,
   } = secondsToHoursMinutesSeconds(
-    timeInfoToday.coveredHours * 3600 +
+    timeInfoToday.workedHours * 3600 +
       props.timerHours * 3600 +
       props.timerMinutes * 60 +
       props.timerSeconds,
@@ -544,13 +533,6 @@ function TimeSummary(props: {
       </SummaryIcon>
       <SummaryIcon icon={<WatchIcon size={20} />} tooltip="Time worked today">
         {timeTodayHours}:{timeTodayMinutes}:{timeTodaySeconds}
-      </SummaryIcon>
-      <SummaryIcon
-        icon={<PiggyBankIcon size={20} />}
-        tooltip="Estimated flex this week, including leave"
-        className={flexColor}
-      >
-        {flexLabel}
       </SummaryIcon>
     </div>
   );

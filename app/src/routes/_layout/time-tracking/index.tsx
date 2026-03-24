@@ -6,9 +6,8 @@ import { SearchBar } from "@/routes/_layout/time-tracking/-components/search-bar
 import { Summary } from "@/routes/_layout/time-tracking/-components/summary";
 import { TimeEntriesList } from "./-components/time-entries-list";
 import { DateRangeSelector } from "./-components/date-range-selector";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { timeTrackingQueries } from "@/lib/api/queries/time-tracking";
-import { apiErrorToast } from "@/lib/api/errors";
 import { userQueries } from "@/lib/api/queries/user";
 import { startOfWeek, endOfWeek, format } from "date-fns";
 import React from "react";
@@ -24,7 +23,6 @@ import {
 } from "@/lib/time-tracking-preferences";
 import { TimeStats } from "./-components/time-stats";
 import { timeTrackingMutations } from "@/lib/api/mutations/time-tracking";
-import { TIME_TRACKING_PROVIDER_URL } from "@/lib/time-tracking-provider";
 import {
   FIRST_TIMER_OF_THE_WEEK_NOTE,
   TRY_CMD_K_NEXT_TIME_NOTE,
@@ -59,13 +57,14 @@ export const Route = createFileRoute("/_layout/time-tracking/")({
     }
 
     const currentWeekDateRange = getCurrentWeekDateRange();
-    void context.queryClient.prefetchQuery(
-      timeTrackingQueries.timeEntries(currentWeekDateRange),
-    );
-    void context.queryClient.prefetchQuery(
-      timeTrackingQueries.timeInfo(currentWeekDateRange),
-    );
-    void context.queryClient.prefetchQuery(timeTrackingQueries.listProjects());
+    await Promise.all([
+      context.queryClient.ensureQueryData(
+        timeTrackingQueries.timeEntries(currentWeekDateRange),
+      ),
+      context.queryClient.ensureQueryData(
+        timeTrackingQueries.timeInfo(currentWeekDateRange),
+      ),
+    ]);
   },
   component: TimeTrackingPage,
 });
@@ -94,7 +93,6 @@ function TimeTrackingPage() {
   const [mergeSameDay, setMergeSameDay] = useAtom(mergeSameDayPersistedAtom);
   const [storedViewMode, setViewMode] = useAtom(viewModePersistedAtom);
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const queryClient = useQueryClient();
   const viewMode = isDesktop ? storedViewMode : "list";
   const [rememberLastProject, setRememberLastProject] = useAtom(
     rememberLastProjectAtom,
@@ -105,7 +103,7 @@ function TimeTrackingPage() {
   const { data: user } = useQuery(userQueries.me());
   const isAdmin = user?.roles.includes("Admin") ?? false;
 
-  const { data: timeEntries, isLoading: isTimeEntriesLoading } = useQuery({
+  const { data: timeEntries } = useQuery({
     ...timeTrackingQueries.timeEntries({
       from: dateRange.from,
       to: dateRange.to,
@@ -132,7 +130,7 @@ function TimeTrackingPage() {
         setIsNewEntryOpen(false);
         toast.success("Entry created");
       },
-      onError: apiErrorToast("Failed to create entry"),
+      onError: () => toast.error("Failed to create entry"),
     });
 
   const [isNewEntryOpen, setIsNewEntryOpen] = React.useState(false);
@@ -147,10 +145,6 @@ function TimeTrackingPage() {
       }),
     });
   }, [rememberLastProject, lastProject, lastActivity, startTimer]);
-
-  const prefetchProjects = React.useCallback(() => {
-    void queryClient.prefetchQuery(timeTrackingQueries.listProjects());
-  }, [queryClient]);
 
   return (
     <div className="min-h-screen">
@@ -175,13 +169,13 @@ function TimeTrackingPage() {
                 {/* Title section */}
                 <div className="space-y-2">
                   <a
-                    href={TIME_TRACKING_PROVIDER_URL}
+                    href={import.meta.env.VITE_TIME_TRACKING_PROVIDER_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="group inline-flex items-center gap-2"
                   >
                     <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">
-                      <span className="text-gradient">Kleer</span>
+                      <span className="text-gradient">Time tracking</span>
                     </h1>
                     <ExternalLink className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                   </a>
@@ -214,8 +208,6 @@ function TimeTrackingPage() {
                   )}
                   <Button
                     onClick={() => setIsNewEntryOpen(true)}
-                    onMouseEnter={prefetchProjects}
-                    onFocus={prefetchProjects}
                     className="btn-glow h-11 gap-2 rounded-xl bg-primary px-5 font-semibold text-primary-foreground shadow-md transition-all hover:bg-primary/90 hover:shadow-glow"
                   >
                     <Plus className="h-4 w-4" />
@@ -298,11 +290,7 @@ function TimeTrackingPage() {
             <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_380px]">
               {/* Time Entries */}
               <div className="min-w-0">
-                {isTimeEntriesLoading ? (
-                  <div className="min-h-[400px] rounded-2xl border border-border/50 bg-card/30 p-8 text-sm text-muted-foreground">
-                    Loading entries...
-                  </div>
-                ) : timeEntries?.length ? (
+                {timeEntries?.length ? (
                   viewMode === "timeline" ? (
                     <TimelineView
                       timeEntries={filteredTimeEntries ?? []}
@@ -388,7 +376,7 @@ function NotConnectedState({
           <Clock className="h-8 w-8" />
         </div>
         <h1 className="font-display text-4xl font-bold tracking-tight">
-          Kleer
+          Time tracking
         </h1>
         <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
           Your Toki account is not connected to a Kleer user yet. Contact an

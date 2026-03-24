@@ -15,10 +15,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { timeTrackingMutations } from "@/lib/api/mutations/time-tracking";
-import { apiErrorToast } from "@/lib/api/errors";
 import { timeTrackingQueries } from "@/lib/api/queries/time-tracking";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCwIcon, Settings2Icon, UserCheckIcon } from "lucide-react";
+import { RefreshCwIcon, Settings2Icon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Tooltip,
@@ -43,34 +42,19 @@ export const TimeTrackingSettings = ({
   const { mutate: importKleerUsers, isPending: isImporting } =
     timeTrackingMutations.useImportKleerUsers({
       onSuccess: () => toast.success("Kleer users synced"),
-      onError: apiErrorToast("Failed to sync Kleer users"),
-    });
-  const { mutate: linkKleerUsersByEmail, isPending: isLinkingByEmail } =
-    timeTrackingMutations.useLinkKleerUsersByEmail({
-      onSuccess: (data) => {
-        const count = data.createdLinkCount;
-        if (count === 0) {
-          toast.info("No matching emails found");
-          return;
-        }
-
-        toast.success(
-          count === 1 ? "1 mapping created" : `${count} mappings created`,
-        );
-      },
-      onError: apiErrorToast("Failed to match Kleer users"),
+      onError: () => toast.error("Failed to sync Kleer users"),
     });
   const { mutate: upsertLink, isPending: isSavingLink } =
     timeTrackingMutations.useUpsertKleerUserLink({
       onSuccess: () => toast.success("Mapping saved"),
-      onError: apiErrorToast("Failed to save mapping"),
+      onError: () => toast.error("Failed to save mapping"),
     });
   const { mutate: deactivateLink, isPending: isRemovingLink } =
     timeTrackingMutations.useDeactivateKleerUserLink({
       onSuccess: () => toast.success("Mapping removed"),
-      onError: apiErrorToast("Failed to remove mapping"),
+      onError: () => toast.error("Failed to remove mapping"),
     });
-  const isMappingBusy = isSavingLink || isRemovingLink || isLinkingByEmail;
+  const isMappingBusy = isSavingLink || isRemovingLink;
 
   return (
     <Popover>
@@ -95,7 +79,7 @@ export const TimeTrackingSettings = ({
       </TooltipProvider>
       <PopoverContent
         align="end"
-        className="w-[26rem] max-w-[calc(100vw-1rem)] overflow-y-auto overflow-x-hidden rounded-xl border-border/70 bg-card/95 p-4 text-card-foreground shadow-elevated backdrop-blur supports-[backdrop-filter]:bg-card/90"
+        className="w-[26rem] max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-xl border-border/70 bg-card/95 p-4 text-card-foreground shadow-elevated backdrop-blur supports-[backdrop-filter]:bg-card/90"
         style={{
           maxHeight:
             "min(calc(100vh - 2rem), var(--radix-popover-content-available-height))",
@@ -137,44 +121,21 @@ export const TimeTrackingSettings = ({
                     Assign Toki users to imported Kleer users.
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5"
-                    disabled={isImporting || isMappingBusy}
-                    onClick={() => importKleerUsers()}
-                  >
-                    <RefreshCwIcon
-                      className={
-                        isImporting ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"
-                      }
-                    />
-                    Sync
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5"
-                    disabled={
-                      isImporting ||
-                      isMappingBusy ||
-                      !adminMappings?.kleerUsers.length
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5"
+                  disabled={isImporting}
+                  onClick={() => importKleerUsers()}
+                >
+                  <RefreshCwIcon
+                    className={
+                      isImporting ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"
                     }
-                    onClick={() => linkKleerUsersByEmail()}
-                  >
-                    <UserCheckIcon
-                      className={
-                        isLinkingByEmail
-                          ? "h-3.5 w-3.5 animate-pulse"
-                          : "h-3.5 w-3.5"
-                      }
-                    />
-                    Match
-                  </Button>
-                </div>
+                  />
+                  Sync
+                </Button>
               </div>
 
               <ScrollArea className="h-[clamp(6rem,calc(100vh-17rem),22rem)] pr-3">

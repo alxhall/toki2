@@ -7,8 +7,7 @@ use time::{Date, OffsetDateTime};
 use crate::domain::{
     models::{
         ActiveTimer, Activity, CreateTimeEntryRequest, EditTimeEntryRequest, NewTimerHistoryEntry,
-        Project, ProjectId, TimeEntry, TimeEntryDayStatus, TimeEntryStatus, TimerHistoryEntry,
-        UserId, WeeklyStats,
+        Project, ProjectId, TimeEntry, TimerHistoryEntry, TimerId, UserId, WeeklyStats,
     },
     ports::{
         inbound::TimeTrackingService,
@@ -31,50 +30,6 @@ pub struct TimeTrackingServiceImpl<C, R> {
 impl<C, R> TimeTrackingServiceImpl<C, R> {
     pub fn new(client: Arc<C>, timer_repo: Arc<R>) -> Self {
         Self { client, timer_repo }
-    }
-
-    fn time_entry_from_create_request(
-        request: &CreateTimeEntryRequest,
-        registration_id: impl Into<String>,
-    ) -> TimeEntry {
-        let date = request.start_time.date();
-        let hours = (request.end_time - request.start_time).whole_seconds() as f64 / 3600.0;
-
-        TimeEntry::new(
-            registration_id,
-            request.project_id.clone(),
-            request.project_name.clone(),
-            request.activity_id.clone(),
-            request.activity_name.clone(),
-            date,
-            hours,
-        )
-        .with_note(request.note.clone())
-        .with_times(Some(request.start_time), Some(request.end_time))
-        .with_week_number(date.iso_week())
-        .with_status(TimeEntryStatus::Open)
-    }
-
-    fn time_entry_from_edit_request(
-        request: &EditTimeEntryRequest,
-        registration_id: impl Into<String>,
-    ) -> TimeEntry {
-        let date = request.start_time.date();
-        let hours = (request.end_time - request.start_time).whole_seconds() as f64 / 3600.0;
-
-        TimeEntry::new(
-            registration_id,
-            request.project_id.clone(),
-            request.project_name.clone(),
-            request.activity_id.clone(),
-            request.activity_name.clone(),
-            date,
-            hours,
-        )
-        .with_note(request.note.clone())
-        .with_times(Some(request.start_time), Some(request.end_time))
-        .with_week_number(date.iso_week())
-        .with_status(TimeEntryStatus::Open)
     }
 }
 
@@ -114,7 +69,7 @@ impl<C: TimeTrackingClient, R: TimerHistoryRepository> TimeTrackingService
         &self,
         user_id: &UserId,
         note: Option<String>,
-    ) -> Result<TimeEntry, TimeTrackingError> {
+    ) -> Result<TimerId, TimeTrackingError> {
         // Get the active timer
         let active_timer = self
             .timer_repo
@@ -150,14 +105,14 @@ impl<C: TimeTrackingClient, R: TimerHistoryRepository> TimeTrackingService
 
         // Create time entry in the provider
         let timer_id = self.client.create_time_entry(&req).await?;
-        let created_entry = Self::time_entry_from_create_request(&req, timer_id.to_string());
 
         // Mark the active timer as finished
+        let end_time_db = OffsetDateTime::now_utc();
         self.timer_repo
-            .save_timer_finished(user_id, &end_time, timer_id.as_str())
+            .save_timer_finished(user_id, &end_time_db, timer_id.as_str())
             .await?;
 
-        Ok(created_entry)
+        Ok(timer_id)
     }
 
     async fn edit_timer(
@@ -256,22 +211,13 @@ impl<C: TimeTrackingClient, R: TimerHistoryRepository> TimeTrackingService
         Ok(entries)
     }
 
-    async fn get_time_entry_day_statuses(
-        &self,
-        date_range: (Date, Date),
-    ) -> Result<Vec<TimeEntryDayStatus>, TimeTrackingError> {
-        self.client.get_time_entry_day_statuses(date_range).await
-    }
-
     async fn create_time_entry(
         &self,
         user_id: &UserId,
         request: &CreateTimeEntryRequest,
-    ) -> Result<TimeEntry, TimeTrackingError> {
+    ) -> Result<TimerId, TimeTrackingError> {
         // Create in provider
         let registration_id = self.client.create_time_entry(request).await?;
-        let created_entry =
-            Self::time_entry_from_create_request(request, registration_id.to_string());
 
         // Persist to local timer history
         let entry = NewTimerHistoryEntry {
@@ -291,17 +237,15 @@ impl<C: TimeTrackingClient, R: TimerHistoryRepository> TimeTrackingService
             // Don't fail the request - the provider entry was created successfully
         }
 
-        Ok(created_entry)
+        Ok(registration_id)
     }
 
     async fn edit_time_entry(
         &self,
         request: &EditTimeEntryRequest,
-    ) -> Result<TimeEntry, TimeTrackingError> {
+    ) -> Result<(), TimeTrackingError> {
         // Edit in provider (may return a new registration ID if day changed)
         let new_registration_id = self.client.edit_time_entry(request).await?;
-        let updated_entry =
-            Self::time_entry_from_edit_request(request, new_registration_id.to_string());
 
         // Update local timer history
         // Check if we have a local record for this registration
@@ -342,7 +286,7 @@ impl<C: TimeTrackingClient, R: TimerHistoryRepository> TimeTrackingService
             }
         }
 
-        Ok(updated_entry)
+        Ok(())
     }
 
     async fn delete_time_entry(&self, registration_id: &str) -> Result<(), TimeTrackingError> {

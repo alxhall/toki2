@@ -4,7 +4,7 @@ use time::Date;
 use crate::domain::{
     models::{
         ActiveTimer, Activity, CreateTimeEntryRequest, EditTimeEntryRequest, Project, ProjectId,
-        TimeEntry, TimeEntryDayStatus, TimerHistoryEntry, UserId, WeeklyStats,
+        TimeEntry, TimerHistoryEntry, TimerId, UserId, WeeklyStats,
     },
     TimeTrackingError,
 };
@@ -45,7 +45,7 @@ pub trait TimeTrackingService: Send + Sync + 'static {
         &self,
         user_id: &UserId,
         note: Option<String>,
-    ) -> Result<TimeEntry, TimeTrackingError>;
+    ) -> Result<TimerId, TimeTrackingError>;
 
     /// Edit the active timer for a user.
     async fn edit_timer(
@@ -90,20 +90,15 @@ pub trait TimeTrackingService: Send + Sync + 'static {
         unique: bool,
     ) -> Result<Vec<TimeEntry>, TimeTrackingError>;
 
-    /// Get date-level statuses for a date range.
-    async fn get_time_entry_day_statuses(
-        &self,
-        date_range: (Date, Date),
-    ) -> Result<Vec<TimeEntryDayStatus>, TimeTrackingError>;
-
     /// Create a new time entry.
     ///
     /// Creates the entry in the provider and persists to local timer history.
+    /// Returns the registration ID from the provider.
     async fn create_time_entry(
         &self,
         user_id: &UserId,
         request: &CreateTimeEntryRequest,
-    ) -> Result<TimeEntry, TimeTrackingError>;
+    ) -> Result<TimerId, TimeTrackingError>;
 
     /// Edit an existing time entry.
     ///
@@ -111,7 +106,7 @@ pub trait TimeTrackingService: Send + Sync + 'static {
     async fn edit_time_entry(
         &self,
         request: &EditTimeEntryRequest,
-    ) -> Result<TimeEntry, TimeTrackingError>;
+    ) -> Result<(), TimeTrackingError>;
 
     /// Delete a time entry.
     async fn delete_time_entry(&self, registration_id: &str) -> Result<(), TimeTrackingError>;

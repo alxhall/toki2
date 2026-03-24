@@ -69,13 +69,6 @@ pub enum TimeEntryStatus {
     Certified,
 }
 
-/// Date-level attestation status for time entry creation/editing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TimeEntryDayStatus {
-    pub date: Date,
-    pub status: TimeEntryStatus,
-}
-
 /// A completed time entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimeEntry {
@@ -151,21 +144,14 @@ pub struct WeeklyStats {
     pub worked_hours: f64,
     pub scheduled_hours: f64,
     pub remaining_hours: f64,
-    pub absence_hours: f64,
-    pub covered_hours: f64,
-    pub period_flex_hours: f64,
 }
 
 impl WeeklyStats {
-    pub fn new(worked_hours: f64, scheduled_hours: f64, absence_hours: f64) -> Self {
-        let covered_hours = worked_hours + absence_hours;
+    pub fn new(worked_hours: f64, scheduled_hours: f64, remaining_hours: f64) -> Self {
         Self {
             worked_hours,
             scheduled_hours,
-            absence_hours,
-            covered_hours,
-            remaining_hours: (scheduled_hours - covered_hours).max(0.0),
-            period_flex_hours: covered_hours - scheduled_hours,
+            remaining_hours,
         }
     }
 }
@@ -187,9 +173,7 @@ pub struct CreateTimeEntryRequest {
 pub struct EditTimeEntryRequest {
     pub registration_id: String,
     pub project_id: ProjectId,
-    pub project_name: String,
     pub activity_id: ActivityId,
-    pub activity_name: String,
     pub start_time: OffsetDateTime,
     pub end_time: OffsetDateTime,
     pub note: String,

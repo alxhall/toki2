@@ -4,7 +4,7 @@ use time::Date;
 use crate::domain::{
     models::{
         Activity, CreateTimeEntryRequest, EditTimeEntryRequest, Project, ProjectId, TimeEntry,
-        TimeEntryDayStatus, TimerId, WeeklyStats,
+        TimerId, WeeklyStats,
     },
     TimeTrackingError,
 };
@@ -45,12 +45,6 @@ pub trait TimeTrackingClient: Send + Sync + 'static {
         &self,
         date_range: (Date, Date),
     ) -> Result<Vec<TimeEntry>, TimeTrackingError>;
-
-    /// Get date-level statuses from the provider for a date range.
-    async fn get_time_entry_day_statuses(
-        &self,
-        date_range: (Date, Date),
-    ) -> Result<Vec<TimeEntryDayStatus>, TimeTrackingError>;
 
     /// Create a new time entry.
     ///

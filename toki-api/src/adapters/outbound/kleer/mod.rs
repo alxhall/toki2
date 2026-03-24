@@ -5,23 +5,22 @@ use std::collections::{HashMap, HashSet};
 use async_trait::async_trait;
 use kleer::{
     KleerActivityList, KleerClient, KleerClientProjectList, KleerClientProjectReadable,
-    KleerCredentials, KleerError, KleerEventReadable, KleerEventRestrictionList,
-    KleerEventWritable, KleerIdRef,
+    KleerCredentials, KleerError, KleerEventReadable, KleerEventWritable, KleerIdRef,
 };
 use time::Date;
 
 use crate::domain::{
     models::{
         Activity, ActivityId, CreateTimeEntryRequest, EditTimeEntryRequest, Project, ProjectId,
-        TimeEntry, TimeEntryDayStatus, TimerId, WeeklyStats,
+        TimeEntry, TimerId, WeeklyStats,
     },
     ports::outbound::TimeTrackingClient,
     TimeTrackingError,
 };
 
 use self::conversions::{
-    to_domain_absence_hours, to_domain_activity, to_domain_project, to_domain_scheduled_hours,
-    to_domain_status, to_domain_time_entry,
+    to_domain_activity, to_domain_project, to_domain_scheduled_hours, to_domain_status,
+    to_domain_time_entry, to_domain_weekly_stats,
 };
 
 pub struct KleerAdapter {
@@ -35,8 +34,6 @@ struct VerifiedKleerEventTarget {
 }
 
 impl KleerAdapter {
-    const MISSING_NOTE_COMMENT: &'static str = "missing note";
-
     pub fn new(
         credentials: KleerCredentials,
         target_user_id: i64,
@@ -142,7 +139,7 @@ impl KleerAdapter {
         let activity_id = Self::parse_kleer_id(activity_id.as_str(), "activity id")?;
         let projects = self
             .client
-            .list_active_client_projects()
+            .list_client_projects()
             .await
             .map_err(map_kleer_error)?;
         let activities = self
@@ -189,8 +186,6 @@ impl KleerAdapter {
         note: &str,
         user_id: i64,
     ) -> KleerEventWritable {
-        let note = Self::event_comment(note);
-
         KleerEventWritable {
             foreign_id: Self::event_foreign_id(
                 user_id,
@@ -209,15 +204,7 @@ impl KleerAdapter {
             date: start_time.date(),
             hours: (end_time - start_time).whole_seconds() as f64 / 3600.0,
             comment: note.to_string(),
-            internal_comment: Some(note.to_string()),
-        }
-    }
-
-    fn event_comment(note: &str) -> &str {
-        if note.trim().is_empty() {
-            Self::MISSING_NOTE_COMMENT
-        } else {
-            note
+            internal_comment: None,
         }
     }
 
@@ -234,22 +221,6 @@ impl KleerAdapter {
             start_time.unix_timestamp_nanos()
         )
     }
-
-    fn to_domain_day_statuses(statuses: KleerEventRestrictionList) -> Vec<TimeEntryDayStatus> {
-        statuses
-            .event_restriction_readables
-            .into_iter()
-            .filter_map(|restriction| {
-                restriction
-                    .status
-                    .event_date
-                    .map(|date| TimeEntryDayStatus {
-                        date,
-                        status: to_domain_status(restriction.status.status_type),
-                    })
-            })
-            .collect()
-    }
 }
 
 #[async_trait]
@@ -257,7 +228,7 @@ impl TimeTrackingClient for KleerAdapter {
     async fn get_projects(&self) -> Result<Vec<Project>, TimeTrackingError> {
         let projects = self
             .client
-            .list_active_client_projects()
+            .list_client_projects()
             .await
             .map_err(map_kleer_error)?;
 
@@ -276,7 +247,7 @@ impl TimeTrackingClient for KleerAdapter {
     ) -> Result<Vec<Activity>, TimeTrackingError> {
         let projects = self
             .client
-            .list_active_client_projects()
+            .list_client_projects()
             .await
             .map_err(map_kleer_error)?;
         let activities = self
@@ -313,11 +284,6 @@ impl TimeTrackingClient for KleerAdapter {
             .list_schedule_summary(self.target_user_id, date_range.0, date_range.1)
             .await
             .or_else(empty_schedule_for_missing_payroll_user)?;
-        let payroll_events = self
-            .client
-            .list_payroll_events(self.target_user_id, date_range.0, date_range.1)
-            .await
-            .or_else(empty_payroll_events_for_missing_payroll_user)?;
 
         let worked_hours: f64 = events
             .event_readables
@@ -326,13 +292,8 @@ impl TimeTrackingClient for KleerAdapter {
             .map(|event| event.hours)
             .sum();
         let scheduled_hours = to_domain_scheduled_hours(&schedule.payroll_user_schedule_metadatas);
-        let absence_hours = to_domain_absence_hours(&payroll_events.payroll_events);
 
-        Ok(WeeklyStats::new(
-            worked_hours,
-            scheduled_hours,
-            absence_hours,
-        ))
+        Ok(to_domain_weekly_stats(worked_hours, scheduled_hours))
     }
 
     async fn get_time_entries(
@@ -370,9 +331,15 @@ impl TimeTrackingClient for KleerAdapter {
             .iter()
             .map(|activity| (activity.id.id, activity.name.clone()))
             .collect();
-        let status_by_date: HashMap<_, _> = Self::to_domain_day_statuses(statuses)
+        let status_by_date: HashMap<_, _> = statuses
+            .event_restriction_readables
             .into_iter()
-            .map(|day_status| (day_status.date, day_status.status))
+            .filter_map(|restriction| {
+                restriction
+                    .status
+                    .event_date
+                    .map(|date| (date, to_domain_status(restriction.status.status_type)))
+            })
             .collect();
 
         let mut entries = Vec::new();
@@ -416,19 +383,6 @@ impl TimeTrackingClient for KleerAdapter {
         }
 
         Ok(entries)
-    }
-
-    async fn get_time_entry_day_statuses(
-        &self,
-        date_range: (Date, Date),
-    ) -> Result<Vec<TimeEntryDayStatus>, TimeTrackingError> {
-        let statuses = self
-            .client
-            .list_event_statuses(self.target_user_id, date_range.0, date_range.1)
-            .await
-            .map_err(map_kleer_error)?;
-
-        Ok(Self::to_domain_day_statuses(statuses))
     }
 
     async fn create_time_entry(
@@ -503,43 +457,16 @@ fn map_kleer_error(error: KleerError) -> TimeTrackingError {
         KleerError::InvalidConfig(message)
         | KleerError::Request(message)
         | KleerError::Deserialize { message, .. } => TimeTrackingError::unknown(message),
-        KleerError::Response { status, body } => {
-            let message = kleer_response_message(&body);
-            tracing::warn!("Kleer returned non-success response: status={status}, body={message}");
-            TimeTrackingError::unknown(format!("Kleer returned {status}: {message}"))
+        KleerError::Response { status, body: _ } => {
+            tracing::warn!("Kleer returned non-success response: status={status}");
+            TimeTrackingError::unknown(format!("Kleer returned {status}"))
         }
     }
-}
-
-fn kleer_response_message(body: &str) -> String {
-    let message = serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("message")
-                .and_then(|message| message.as_str())
-                .map(str::to_string)
-        })
-        .filter(|message| !message.trim().is_empty())
-        .unwrap_or_else(|| "empty response body".to_string());
-
-    let message = message.replace(['\r', '\n', '\t'], " ");
-    message.chars().take(500).collect()
 }
 
 fn empty_schedule_for_missing_payroll_user(
     error: KleerError,
 ) -> Result<kleer::KleerScheduleMetadataList, TimeTrackingError> {
-    if is_missing_payroll_user(&error) {
-        Ok(Default::default())
-    } else {
-        Err(map_kleer_error(error))
-    }
-}
-
-fn empty_payroll_events_for_missing_payroll_user(
-    error: KleerError,
-) -> Result<kleer::KleerPayrollEventList, TimeTrackingError> {
     if is_missing_payroll_user(&error) {
         Ok(Default::default())
     } else {
@@ -554,66 +481,4 @@ fn is_missing_payroll_user(error: &KleerError) -> bool {
             if *status == reqwest::StatusCode::INTERNAL_SERVER_ERROR
                 && body.contains("PayrollUserDoesNotExistException")
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use time::Month;
-
-    #[test]
-    fn event_payload_saves_note_as_external_and_internal_comment() {
-        let start_time = Date::from_calendar_date(2026, Month::May, 6)
-            .unwrap()
-            .with_hms(8, 0, 0)
-            .unwrap()
-            .assume_utc();
-        let end_time = start_time + time::Duration::hours(2);
-
-        let payload = KleerAdapter::build_event_writable(
-            VerifiedKleerEventTarget {
-                project_id: 321,
-                activity_id: 654,
-            },
-            start_time,
-            end_time,
-            "Worked on PR review",
-            987,
-        );
-
-        assert_eq!(payload.comment, "Worked on PR review");
-        assert_eq!(
-            payload.internal_comment.as_deref(),
-            Some("Worked on PR review")
-        );
-    }
-
-    #[test]
-    fn event_payload_replaces_empty_note_with_missing_note() {
-        let start_time = Date::from_calendar_date(2026, Month::May, 6)
-            .unwrap()
-            .with_hms(8, 0, 0)
-            .unwrap()
-            .assume_utc();
-        let end_time = start_time + time::Duration::hours(2);
-
-        for note in ["", "   ", "\n\t"] {
-            let payload = KleerAdapter::build_event_writable(
-                VerifiedKleerEventTarget {
-                    project_id: 321,
-                    activity_id: 654,
-                },
-                start_time,
-                end_time,
-                note,
-                987,
-            );
-
-            assert_eq!(payload.comment, KleerAdapter::MISSING_NOTE_COMMENT);
-            assert_eq!(
-                payload.internal_comment.as_deref(),
-                Some(KleerAdapter::MISSING_NOTE_COMMENT)
-            );
-        }
-    }
 }
