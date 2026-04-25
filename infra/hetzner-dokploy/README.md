@@ -96,7 +96,7 @@ Create the backend app:
   - Dockerfile path: `Dockerfile`
   - Build context/path: repository root
   - Internal port: `8080`
-  - Domain: `toki-api.spinit.se`
+  - Domain: `toki-api.bkmn.xyz`
   - Enable HTTPS/TLS with Let's Encrypt.
 
 Create the frontend app:
@@ -106,30 +106,26 @@ Create the frontend app:
   - Dockerfile path: `app/Dockerfile`
   - Build context/path: repository root
   - Internal port: `80`
-  - Domain: `toki.spinit.se`
+  - Domain: `toki.bkmn.xyz`
   - Enable HTTPS/TLS with Let's Encrypt.
 
 Finally, configure Dokploy database backups.
 
 ## App Environment
 
-Frontend build-time arguments:
+Frontend build environment:
 
 ```bash
-VITE_API_URL=https://toki-api.spinit.se
+VITE_API_URL=https://toki-api.bkmn.xyz
 VITE_TIME_TRACKING_PROVIDER_URL=<Kleer test or production web URL>
 ```
-
-Set these on the web application under **Environment -> Build-time Arguments**.
-The runtime **Environment Settings** are available to the nginx container after
-the Vite bundle has already been built, so they do not change `import.meta.env`.
 
 Backend production environment:
 
 ```bash
 APP_ENVIRONMENT=production
-TOKI_APPLICATION__APP_URL=https://toki.spinit.se
-TOKI_APPLICATION__API_URL=https://toki-api.spinit.se
+TOKI_APPLICATION__APP_URL=https://toki.bkmn.xyz
+TOKI_APPLICATION__API_URL=https://toki-api.bkmn.xyz
 TOKI_APPLICATION__HOST=0.0.0.0
 TOKI_APPLICATION__PORT=8080
 TOKI_DATABASE__HOST=<Dokploy Postgres service host>
@@ -141,7 +137,7 @@ TOKI_DATABASE__REQUIRE_SSL=false
 DATABASE_URL=postgres://<user>:<password>@<Dokploy Postgres service host>:5432/<database>
 TOKI_AUTH__CLIENT_ID=<Azure AD app client id>
 TOKI_AUTH__CLIENT_SECRET=<Azure AD app secret>
-TOKI_AUTH__REDIRECT_URL=https://toki-api.spinit.se/oauth/callback
+TOKI_AUTH__REDIRECT_URL=https://toki-api.bkmn.xyz/oauth/callback
 TOKI_KLEER__TOKEN=<Kleer service token>
 TOKI_KLEER__COMPANY_ID=<Kleer company id>
 TOKI_KLEER__BASE_URL=https://api.kleer.se/v1
@@ -151,23 +147,90 @@ TOKI_KLEER__BASE_URL=https://api.kleer.se/v1
 
 Before cutover, lower TTL for:
 
-- `toki.spinit.se`
-- `toki-api.spinit.se`
+- `toki.bkmn.xyz`
+- `toki-api.bkmn.xyz`
 
 Point A and AAAA records to the `ipv4_address` and `ipv6_address` outputs, then confirm Dokploy issues certificates and smoke-test login, API calls, Kleer time tracking, PR polling, and web push.
 
 When using Cloudflare, keep DNS simple while certificates are issued:
 
-- `toki.spinit.se` -> Hetzner IPv4/IPv6
-- `toki-api.spinit.se` -> Hetzner IPv4/IPv6
+- `toki.bkmn.xyz` -> Hetzner IPv4/IPv6
+- `toki-api.bkmn.xyz` -> Hetzner IPv4/IPv6
 - If Let's Encrypt issuance fails behind the Cloudflare proxy, temporarily switch the records to DNS-only until Dokploy has issued certificates.
 
-## Smoke Checks
+## Database Migration
+
+Create a Fly production dump without touching local databases:
 
 ```bash
-curl -I https://toki.spinit.se/prs
-curl -I https://toki-api.spinit.se/
-tailscale ssh root@toki-dokploy-01 'docker service ls'
+just db-prod-pull --dump-only --dump-path ./prod.dump
+```
+
+Before restoring, scale the API to zero in Dokploy or with Docker Swarm so the application is not writing to the target database:
+
+```bash
+ssh root@<server-ip> 'docker service scale toki-api-8gdssr=0'
+```
+
+Transfer the dump to the VM over Tailscale/SSH:
+
+```bash
+scp prod.dump root@<server-ip>:/root/toki-fly-prod.dump
+```
+
+Copy the dump into the running Dokploy PostgreSQL container and restore into a clean schema set:
+
+```bash
+ssh root@<server-ip>
+
+cid=$(docker ps --filter name=toki-postgres --format '{{.ID}}' | head -n1)
+docker cp /root/toki-fly-prod.dump "$cid:/tmp/toki-fly-prod.dump"
+
+docker exec -i "$cid" psql -U toki -d toki -v ON_ERROR_STOP=1 <<'SQL'
+DROP SCHEMA IF EXISTS tower_sessions CASCADE;
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+GRANT ALL ON SCHEMA public TO toki;
+GRANT ALL ON SCHEMA public TO public;
+SQL
+
+docker exec "$cid" pg_restore \
+  --no-owner \
+  --no-privileges \
+  -U toki \
+  -d toki \
+  /tmp/toki-fly-prod.dump
+```
+
+Scale the API back up:
+
+```bash
+docker service scale toki-api-8gdssr=1
+```
+
+Validate row counts for:
+
+- `users`
+- `repositories`
+- `timer_history`
+- `time_tracking_provider_users`
+- `time_tracking_user_links`
+- `push_subscriptions`
+- `notifications`
+
+Cleanup dump files after verification:
+
+```bash
+rm -f prod.dump
+ssh root@<server-ip> 'rm -f /root/toki-fly-prod.dump; cid=$(docker ps --filter name=toki-postgres --format "{{.ID}}" | head -n1); [ -n "$cid" ] && docker exec "$cid" rm -f /tmp/toki-fly-prod.dump || true'
+```
+
+Expected smoke checks:
+
+```bash
+curl -I https://toki.bkmn.xyz/prs
+curl -I https://toki-api.bkmn.xyz/
+ssh root@<server-ip> 'docker service ls'
 ```
 
 The API root returning `401` is normal because it is authenticated.
@@ -191,8 +254,8 @@ sudo tail -f /var/log/cloud-init-output.log
 Useful VM checks:
 
 ```bash
-tailscale ssh root@toki-dokploy-01 'docker service ls'
-tailscale ssh root@toki-dokploy-01 'docker service logs --tail 100 toki-api-8gdssr'
-tailscale ssh root@toki-dokploy-01 'ufw status verbose'
-tailscale ssh root@toki-dokploy-01 'tailscale status'
+ssh root@<server-ip> 'docker service ls'
+ssh root@<server-ip> 'docker service logs --tail 100 toki-api-8gdssr'
+ssh root@<server-ip> 'ufw status verbose'
+ssh root@<server-ip> 'tailscale status'
 ```
