@@ -10,7 +10,7 @@ use crate::api::dto::{
 };
 use crate::api::SaveTimerRequest;
 use crate::types::{
-    ActiveTimerState, Activity, GetTimerResponse, Me, Project, TimeEntry, TimeInfo,
+    ActiveTimerState, Activity, GetTimerResponse, Me, Project, TimeEntry, WeeklyStats,
 };
 
 const SESSION_COOKIE: &str = "id";
@@ -151,7 +151,7 @@ impl ApiClient {
         Ok(response.timer)
     }
 
-    pub async fn get_time_info(&mut self, from: time::Date, to: time::Date) -> Result<TimeInfo> {
+    pub async fn get_time_info(&mut self, from: time::Date, to: time::Date) -> Result<WeeklyStats> {
         if let Some(dev) = &self.dev_backend {
             return Ok(dev.time_info());
         }
@@ -290,29 +290,22 @@ impl ApiClient {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn edit_time_entry(
         &mut self,
         project_registration_id: &str,
         project_id: &str,
-        project_name: &str,
         activity_id: &str,
-        activity_name: &str,
         start_time: time::OffsetDateTime,
         end_time: time::OffsetDateTime,
-        reg_day: &str,
-        week_number: i32,
         user_note: &str,
-        original_project_id: Option<&str>,
-        original_activity_id: Option<&str>,
     ) -> Result<()> {
         if let Some(dev) = &self.dev_backend {
             dev.edit_entry(
                 project_registration_id,
                 project_id,
-                project_name,
+                "",
                 activity_id,
-                activity_name,
+                "",
                 start_time,
                 end_time,
                 user_note,
@@ -324,21 +317,14 @@ impl ApiClient {
         let body = EditEntryRequest {
             project_registration_id,
             project_id,
-            project_name,
             activity_id,
-            activity_name,
             start_time: start_time
                 .format(&format)
                 .context("Failed to format start_time")?,
             end_time: end_time
                 .format(&format)
                 .context("Failed to format end_time")?,
-            reg_day,
-            week_number,
             user_note,
-            original_reg_day: None,
-            original_project_id,
-            original_activity_id,
         };
 
         self.send_without_body(

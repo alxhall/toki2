@@ -54,17 +54,10 @@ pub struct UpdateActiveTimerRequest {
 pub struct EditEntryRequest<'a> {
     pub project_registration_id: &'a str,
     pub project_id: &'a str,
-    pub project_name: &'a str,
     pub activity_id: &'a str,
-    pub activity_name: &'a str,
     pub start_time: String,
     pub end_time: String,
-    pub reg_day: &'a str,
-    pub week_number: i32,
     pub user_note: &'a str,
-    pub original_reg_day: Option<String>,
-    pub original_project_id: Option<&'a str>,
-    pub original_activity_id: Option<&'a str>,
 }
 
 #[derive(Serialize)]

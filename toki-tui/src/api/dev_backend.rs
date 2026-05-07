@@ -48,7 +48,6 @@ impl DevBackend {
                 note: e.note.clone(),
                 start_time: Some(e.start_time),
                 end_time: e.end_time,
-                week_number: e.start_time.iso_week(),
                 status: Default::default(),
             })
             .collect()
@@ -122,9 +121,14 @@ impl DevBackend {
         ]
     }
 
-    pub fn time_info(&self) -> crate::types::TimeInfo {
-        crate::types::TimeInfo {
+    pub fn time_info(&self) -> crate::types::WeeklyStats {
+        crate::types::WeeklyStats {
+            worked_hours: 26.0,
             scheduled_hours: 32.0,
+            remaining_hours: 6.0,
+            absence_hours: 0.0,
+            covered_hours: 26.0,
+            period_flex_hours: 1.5,
         }
     }
 }

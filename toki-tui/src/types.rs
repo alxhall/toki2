@@ -16,7 +16,7 @@ pub struct Activity {
     pub project_id: String,
 }
 
-/// Lock status for a time entry.
+/// Lock/approval status for a time entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TimeEntryStatus {
@@ -32,8 +32,8 @@ impl TimeEntryStatus {
     }
 }
 
-/// A completed time entry from GET /time-tracking/time-entries.
-/// start_time / end_time are optional and present only when local timer history exists.
+/// A completed time entry (via GET /time-tracking/time-entries).
+/// start_time / end_time are optional — present only if a local timer history record exists.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeEntry {
@@ -50,8 +50,6 @@ pub struct TimeEntry {
     pub start_time: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub end_time: Option<OffsetDateTime>,
-    #[allow(dead_code)]
-    pub week_number: u8,
     #[serde(default)]
     pub status: TimeEntryStatus,
 }
@@ -88,9 +86,15 @@ pub struct GetTimerResponse {
     pub timer: Option<ActiveTimerState>,
 }
 
-/// Time info returned by GET /time-tracking/time-info.
+/// Weekly stats returned by GET /time-tracking/time-info.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TimeInfo {
+#[allow(dead_code)]
+pub struct WeeklyStats {
+    pub worked_hours: f64,
     pub scheduled_hours: f64,
+    pub remaining_hours: f64,
+    pub absence_hours: f64,
+    pub covered_hours: f64,
+    pub period_flex_hours: f64,
 }

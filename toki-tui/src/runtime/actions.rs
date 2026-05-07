@@ -407,8 +407,13 @@ async fn stop_server_timer_and_clear(app: &mut App, client: &mut ApiClient) {
 }
 
 async fn refresh_history_background(app: &mut App, client: &mut ApiClient) {
-    if let Ok(entries) = fetch_recent_history(client).await {
-        apply_recent_history(app, entries);
+    match fetch_recent_history(client).await {
+        Ok(entries) => {
+            apply_recent_history(app, entries);
+        }
+        Err(e) => {
+            app.set_status(format!("Error refreshing history: {}", e));
+        }
     }
 }
 
@@ -828,47 +833,18 @@ async fn handle_saved_entry_edit_save(
 
     anyhow::ensure!(end_local > start_local, "End time must be after start time");
 
-    // Compute reg_day and week_number from the entry date
-    let reg_day = format!(
-        "{:04}-{:02}-{:02}",
-        entry_date.year(),
-        entry_date.month() as u8,
-        entry_date.day()
-    );
-    let week_number = entry_date.iso_week() as i32;
-
-    // Determine delta fields (only set if project/activity changed)
-    let original_project_id = if state.project_id.as_deref() != Some(entry.project_id.as_str()) {
-        Some(entry.project_id.as_str())
-    } else {
-        None
-    };
-    let original_activity_id = if state.activity_id.as_deref() != Some(entry.activity_id.as_str()) {
-        Some(entry.activity_id.as_str())
-    } else {
-        None
-    };
-
     let project_id = state.project_id.as_deref().unwrap_or("");
-    let project_name = state.project_name.as_deref().unwrap_or("");
     let activity_id = state.activity_id.as_deref().unwrap_or("");
-    let activity_name = state.activity_name.as_deref().unwrap_or("");
     let user_note = &state.note.value;
 
     client
         .edit_time_entry(
             &registration_id,
             project_id,
-            project_name,
             activity_id,
-            activity_name,
             start_local.to_offset(time::UtcOffset::UTC),
             end_local.to_offset(time::UtcOffset::UTC),
-            &reg_day,
-            week_number,
             user_note,
-            original_project_id,
-            original_activity_id,
         )
         .await?;
 
