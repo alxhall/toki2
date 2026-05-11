@@ -95,6 +95,8 @@ pub struct App {
 
     // Scheduled hours per week from the time tracking backend (defaults to 40.0 until fetched)
     pub scheduled_hours_per_week: f64,
+    /// Estimated period flex hours from the time tracking backend (0.0 until fetched)
+    pub period_flex_hours: f64,
 
     // Activity cache: project_id -> fetched activities
     pub activity_cache: HashMap<String, Vec<Activity>>,
@@ -184,6 +186,7 @@ impl App {
             is_loading: false,
             throbber_state: throbber_widgets_tui::ThrobberState::default(),
             scheduled_hours_per_week: 40.0,
+            period_flex_hours: 0.0,
             activity_cache: HashMap::new(),
             weekly_stats_cache: Vec::new(),
             weekly_daily_stats_cache: Vec::new(),
