@@ -1,0 +1,154 @@
+name: TUI Release
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - "release/v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  test-tui:
+    name: Test TUI
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Run toki-tui tests
+        run: cargo test -p toki-tui
+
+  build-linux:
+    name: Build (Linux musl ${{ matrix.target }})
+    needs: test-tui
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            artifact: toki-tui-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            artifact: toki-tui-linux-aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        run: cross build -p toki-tui --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        run: cp target/${{ matrix.target }}/release/toki-tui ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  build-windows:
+    name: Build (Windows)
+    needs: test-tui
+    runs-on: windows-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Build
+        run: cargo build -p toki-tui --release
+
+      - name: Rename binary
+        run: cp target\release\toki-tui.exe toki-tui-windows.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toki-tui-windows
+          path: toki-tui-windows.exe
+
+  build-macos:
+    name: Build (macOS ${{ matrix.artifact }})
+    needs: test-tui
+    runs-on: macos-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            artifact: toki-tui-macos-intel
+          - target: aarch64-apple-darwin
+            artifact: toki-tui-macos-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Build
+        run: cargo build -p toki-tui --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        run: cp target/${{ matrix.target }}/release/toki-tui ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Create GitHub Release
+    # Only publish a release when a tag is pushed, not on every branch push
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            toki-tui-linux-x86_64
+            toki-tui-linux-aarch64
+            toki-tui-windows.exe
+            toki-tui-macos-intel
+            toki-tui-macos-arm
+          generate_release_notes: true
