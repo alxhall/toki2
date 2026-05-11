@@ -69,6 +69,13 @@ pub enum TimeEntryStatus {
     Certified,
 }
 
+/// Date-level attestation status for time entry creation/editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeEntryDayStatus {
+    pub date: Date,
+    pub status: TimeEntryStatus,
+}
+
 /// A completed time entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimeEntry {
@@ -180,7 +187,9 @@ pub struct CreateTimeEntryRequest {
 pub struct EditTimeEntryRequest {
     pub registration_id: String,
     pub project_id: ProjectId,
+    pub project_name: String,
     pub activity_id: ActivityId,
+    pub activity_name: String,
     pub start_time: OffsetDateTime,
     pub end_time: OffsetDateTime,
     pub note: String,

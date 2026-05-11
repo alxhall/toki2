@@ -7,14 +7,22 @@ use time::OffsetDateTime;
 
 use crate::domain::models::{
     ActiveTimer, Activity, BoardColumn, BoardData, BoardState, Iteration, Project, PullRequestRef,
-    TimeEntry, TimeEntryStatus, TimerHistoryEntry, WeeklyStats, WorkItem, WorkItemCategory,
-    WorkItemPerson, WorkItemProject, WorkItemRef,
+    TimeEntry, TimeEntryDayStatus, TimeEntryStatus, TimerHistoryEntry, WeeklyStats, WorkItem,
+    WorkItemCategory, WorkItemPerson, WorkItemProject, WorkItemRef,
 };
 
 /// Response for the get timer endpoint.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetTimerResponse {
+    pub timer: Option<TimerResponse>,
+}
+
+/// Response for saving the active timer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTimerResponse {
+    pub entry: TimeEntryResponse,
     pub timer: Option<TimerResponse>,
 }
 
@@ -132,6 +140,24 @@ impl From<TimeEntry> for TimeEntryResponse {
             end_time: entry.end_time,
             week_number: entry.week_number,
             status: entry.status,
+        }
+    }
+}
+
+/// Date-level time entry status response.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeEntryDayStatusResponse {
+    /// Date in YYYY-MM-DD format.
+    pub date: String,
+    pub status: TimeEntryStatus,
+}
+
+impl From<TimeEntryDayStatus> for TimeEntryDayStatusResponse {
+    fn from(day_status: TimeEntryDayStatus) -> Self {
+        Self {
+            date: day_status.date.to_string(),
+            status: day_status.status,
         }
     }
 }
