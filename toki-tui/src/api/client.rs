@@ -13,7 +13,7 @@ use crate::types::{
     ActiveTimerState, Activity, GetTimerResponse, Me, Project, TimeEntry, WeeklyStats,
 };
 
-const SESSION_COOKIE: &str = "id";
+const SESSION_COOKIE: &str = "toki.sid";
 const UNAUTH_INVALID_SESSION: &str =
     "Session expired or invalid. Run `toki-tui login` to authenticate.";
 const UNAUTH_RELOGIN: &str = "Session expired. Run `toki-tui login` to re-authenticate.";
