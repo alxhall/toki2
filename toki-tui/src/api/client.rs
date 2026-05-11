@@ -294,7 +294,9 @@ impl ApiClient {
         &mut self,
         project_registration_id: &str,
         project_id: &str,
+        project_name: &str,
         activity_id: &str,
+        activity_name: &str,
         start_time: time::OffsetDateTime,
         end_time: time::OffsetDateTime,
         user_note: &str,
@@ -303,9 +305,9 @@ impl ApiClient {
             dev.edit_entry(
                 project_registration_id,
                 project_id,
-                "",
+                project_name,
                 activity_id,
-                "",
+                activity_name,
                 start_time,
                 end_time,
                 user_note,
@@ -317,7 +319,9 @@ impl ApiClient {
         let body = EditEntryRequest {
             project_registration_id,
             project_id,
+            project_name,
             activity_id,
+            activity_name,
             start_time: start_time
                 .format(&format)
                 .context("Failed to format start_time")?,

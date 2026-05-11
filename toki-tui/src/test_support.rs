@@ -53,7 +53,6 @@ pub fn time_entry(
         note: note.map(ToString::to_string),
         start_time,
         end_time,
-        week_number: 1,
         status: TimeEntryStatus::Open,
     }
 }

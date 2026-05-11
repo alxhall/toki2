@@ -148,15 +148,17 @@ pub(super) async fn handle_start_timer(app: &mut App, client: &mut ApiClient) ->
                     Some(full)
                 }
             };
+            // Optimistic: start the timer locally immediately, roll back on error.
+            let auto_resize = app.auto_resize_timer;
+            app.start_timer(auto_resize);
             if let Err(e) = client
                 .start_timer(project_id, project_name, activity_id, activity_name, note)
                 .await
             {
+                app.stop_timer(auto_resize);
                 app.set_status(format!("Error starting timer: {}", e));
                 return Ok(());
             }
-            let auto_resize = app.auto_resize_timer;
-            app.start_timer(auto_resize);
             app.clear_status();
         }
         app::TimerState::Running => {
@@ -379,20 +381,34 @@ async fn load_history_and_open(app: &mut App, client: &mut ApiClient) {
 async fn handle_confirm_delete(app: &mut App, client: &mut ApiClient) {
     if let Some(ctx) = app.delete_context.take() {
         let origin = ctx.origin;
-        match client.delete_time_entry(&ctx.registration_id).await {
-            Ok(()) => {
-                app.time_entries
-                    .retain(|e| e.registration_id != ctx.registration_id);
-                app.rebuild_history_list();
-                app.set_status("Entry deleted".to_string());
-            }
-            Err(e) => {
-                app.set_status(format!("Delete failed: {}", e));
-            }
-        }
+
+        // Optimistic: remove from local state immediately, restore on error.
+        let removed = app
+            .time_entries
+            .iter()
+            .position(|e| e.registration_id == ctx.registration_id)
+            .map(|idx| app.time_entries.remove(idx));
+        app.rebuild_history_list();
+
         match origin {
             app::DeleteOrigin::Timer => app.navigate_to(app::View::Timer),
             app::DeleteOrigin::History => app.navigate_to(app::View::History),
+        }
+
+        match client.delete_time_entry(&ctx.registration_id).await {
+            Ok(()) => {
+                app.set_status("Entry deleted".to_string());
+            }
+            Err(e) => {
+                // Roll back: re-insert the entry and rebuild the list
+                if let Some(entry) = removed {
+                    app.time_entries.push(entry);
+                    app.time_entries
+                        .sort_by(|a, b| b.date.cmp(&a.date));
+                    app.rebuild_history_list();
+                }
+                app.set_status(format!("Delete failed: {}", e));
+            }
         }
     }
 }
@@ -465,21 +481,22 @@ async fn resume_entry(entry: types::TimeEntry, app: &mut App, client: &mut ApiCl
     let activity_name = Some(entry.activity_name.clone());
     let note = entry.note.clone().filter(|n| !n.is_empty());
 
+    // Optimistic: copy fields and start the timer locally immediately, roll back on error.
+    app.copy_entry_fields(&entry);
+    let auto_resize = app.auto_resize_timer;
+    app.start_timer(auto_resize);
     match client
         .start_timer(project_id, project_name, activity_id, activity_name, note)
         .await
     {
         Ok(()) => {
-            // Only mutate local state after confirmed server success
-            app.copy_entry_fields(&entry);
-            let auto_resize = app.auto_resize_timer;
-            app.start_timer(auto_resize); // sets TimerState::Running + TimerSize::Large + local_start
             app.set_status(format!(
                 "Resumed: {}: {}",
                 entry.project_name, entry.activity_name
             ));
         }
         Err(e) => {
+            app.stop_timer(auto_resize);
             app.set_status(format!("Error resuming entry: {}", e));
         }
     }
@@ -515,75 +532,100 @@ pub(super) async fn handle_save_timer_with_action(
         activity_name: app.selected_activity.as_ref().map(|a| a.name.clone()),
     };
 
-    // Save the active timer to the time tracking backend
-    match client.save_timer(save_request).await {
-        Ok(()) => {
-            let hours = duration.as_secs() / 3600;
-            let minutes = (duration.as_secs() % 3600) / 60;
-            let seconds = duration.as_secs() % 60;
-            let duration_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+    let hours = duration.as_secs() / 3600;
+    let minutes = (duration.as_secs() % 3600) / 60;
+    let seconds = duration.as_secs() % 60;
+    let duration_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
+    let auto_resize = app.auto_resize_timer;
 
-            // Refresh history
-            if let Ok(entries) = fetch_recent_history(client).await {
-                apply_recent_history(app, entries);
+    // Optimistic: update local state immediately then fire the API.
+    // On error we roll back and restore the running timer.
+    match app.selected_save_action {
+        app::SaveAction::SaveAndStop => {
+            app.stop_timer(auto_resize);
+            app.navigate_to(app::View::Timer);
+
+            if let Err(e) = client.save_timer(save_request).await {
+                // Roll back: restore the running timer
+                app.start_timer(auto_resize);
+                app.set_status(format!("Error saving timer: {}", e));
+            } else {
+                app.set_status(format!(
+                    "Saved {} to {} / {}",
+                    duration_str, project_display, activity_display
+                ));
+                // Refresh history in the background so the saved entry appears immediately.
+                refresh_history_background(app, client).await;
+            }
+        }
+        app::SaveAction::ContinueSameProject => {
+            // Stop the old timer, immediately start a new one for the same project/activity.
+            app.description_input.clear();
+            app.description_is_default = true;
+            app.stop_timer(auto_resize);
+            app.start_timer(auto_resize);
+            app.navigate_to(app::View::Timer);
+
+            // Save old timer
+            if let Err(e) = client.save_timer(save_request).await {
+                // Roll back: go back to stopped (the new timer never really existed)
+                app.stop_timer(auto_resize);
+                app.set_status(format!("Error saving timer: {}", e));
+                return Ok(());
             }
 
-            match app.selected_save_action {
-                app::SaveAction::ContinueSameProject => {
-                    app.description_input.clear();
-                    app.description_is_default = true;
-                    // Start a new server-side timer with same project/activity
-                    let project_id = app.selected_project.as_ref().map(|p| p.id.clone());
-                    let project_name = app.selected_project.as_ref().map(|p| p.name.clone());
-                    let activity_id = app.selected_activity.as_ref().map(|a| a.id.clone());
-                    let activity_name = app.selected_activity.as_ref().map(|a| a.name.clone());
-                    if let Err(e) = client
-                        .start_timer(project_id, project_name, activity_id, activity_name, None)
-                        .await
-                    {
-                        app.set_status(format!("Saved but could not restart timer: {}", e));
-                    } else {
-                        let auto_resize = app.auto_resize_timer;
-                        app.start_timer(auto_resize);
-                        app.set_status(format!(
-                            "Saved {} to {} / {}",
-                            duration_str, project_display, activity_display
-                        ));
-                    }
-                }
-                app::SaveAction::ContinueNewProject => {
-                    app.selected_project = None;
-                    app.selected_activity = None;
-                    app.description_input.clear();
-                    app.description_is_default = true;
-                    // Start new timer with no project yet
-                    if let Err(e) = client.start_timer(None, None, None, None, None).await {
-                        app.set_status(format!("Saved but could not restart timer: {}", e));
-                    } else {
-                        let auto_resize = app.auto_resize_timer;
-                        app.start_timer(auto_resize);
-                        app.set_status(format!(
-                            "Saved {}. Timer started. Press P to select project.",
-                            duration_str
-                        ));
-                    }
-                }
-                app::SaveAction::SaveAndStop => {
-                    app.stop_timer(app.auto_resize_timer);
-                    app.set_status(format!(
-                        "Saved {} to {} / {}",
-                        duration_str, project_display, activity_display
-                    ));
-                }
-                app::SaveAction::Cancel => unreachable!(),
+            // Start new server-side timer (fire-and-forget style: warn but don't roll back UI)
+            let project_id = app.selected_project.as_ref().map(|p| p.id.clone());
+            let project_name = app.selected_project.as_ref().map(|p| p.name.clone());
+            let activity_id = app.selected_activity.as_ref().map(|a| a.id.clone());
+            let activity_name = app.selected_activity.as_ref().map(|a| a.name.clone());
+            if let Err(e) = client
+                .start_timer(project_id, project_name, activity_id, activity_name, None)
+                .await
+            {
+                app.set_status(format!("Saved but could not restart timer: {}", e));
+            } else {
+                app.set_status(format!(
+                    "Saved {} to {} / {}",
+                    duration_str, project_display, activity_display
+                ));
+            }
+            // Refresh history in the background so the saved entry appears immediately.
+            refresh_history_background(app, client).await;
+        }
+        app::SaveAction::ContinueNewProject => {
+            // Stop the old timer, immediately start a new blank one.
+            let saved_project = app.selected_project.take();
+            let saved_activity = app.selected_activity.take();
+            app.description_input.clear();
+            app.description_is_default = true;
+            app.stop_timer(auto_resize);
+            app.start_timer(auto_resize);
+            app.navigate_to(app::View::Timer);
+
+            // Save old timer
+            if let Err(e) = client.save_timer(save_request).await {
+                // Roll back: restore state before save
+                app.stop_timer(auto_resize);
+                app.selected_project = saved_project;
+                app.selected_activity = saved_activity;
+                app.set_status(format!("Error saving timer: {}", e));
+                return Ok(());
             }
 
-            app.navigate_to(app::View::Timer);
+            // Start new blank server-side timer
+            if let Err(e) = client.start_timer(None, None, None, None, None).await {
+                app.set_status(format!("Saved but could not restart timer: {}", e));
+            } else {
+                app.set_status(format!(
+                    "Saved {}. Timer started. Press P to select project.",
+                    duration_str
+                ));
+            }
+            // Refresh history in the background so the saved entry appears immediately.
+            refresh_history_background(app, client).await;
         }
-        Err(e) => {
-            app.set_status(format!("Error saving timer: {}", e));
-            app.navigate_to(app::View::Timer);
-        }
+        app::SaveAction::Cancel => unreachable!(),
     }
 
     Ok(())
@@ -834,32 +876,61 @@ async fn handle_saved_entry_edit_save(
     anyhow::ensure!(end_local > start_local, "End time must be after start time");
 
     let project_id = state.project_id.as_deref().unwrap_or("");
+    let project_name = state.project_name.as_deref().unwrap_or("");
     let activity_id = state.activity_id.as_deref().unwrap_or("");
+    let activity_name = state.activity_name.as_deref().unwrap_or("");
     let user_note = &state.note.value;
 
-    client
+    // Optimistic: apply the edit to the in-memory entry immediately, roll back on error.
+    // Keep a snapshot for rollback.
+    let snapshot = entry.clone();
+    let start_utc = start_local.to_offset(time::UtcOffset::UTC);
+    let end_utc = end_local.to_offset(time::UtcOffset::UTC);
+    let optimistic_hours = (end_utc - start_utc).as_seconds_f64() / 3600.0;
+
+    if let Some(e) = app
+        .time_entries
+        .iter_mut()
+        .find(|e| e.registration_id == registration_id)
+    {
+        e.project_id = project_id.to_string();
+        e.project_name = project_name.to_string();
+        e.activity_id = activity_id.to_string();
+        e.activity_name = activity_name.to_string();
+        e.note = if user_note.is_empty() {
+            None
+        } else {
+            Some(user_note.to_string())
+        };
+        e.start_time = Some(start_utc);
+        e.end_time = Some(end_utc);
+        e.hours = optimistic_hours;
+    }
+    app.rebuild_history_list();
+
+    if let Err(e) = client
         .edit_time_entry(
             &registration_id,
             project_id,
+            project_name,
             activity_id,
-            start_local.to_offset(time::UtcOffset::UTC),
-            end_local.to_offset(time::UtcOffset::UTC),
+            activity_name,
+            start_utc,
+            end_utc,
             user_note,
         )
-        .await?;
-
-    // Reload history to reflect the changes
-    match fetch_recent_history(client).await {
-        Ok(entries) => {
-            apply_recent_history(app, entries);
+        .await
+    {
+        // Roll back to the original entry
+        if let Some(entry) = app
+            .time_entries
+            .iter_mut()
+            .find(|e| e.registration_id == registration_id)
+        {
+            *entry = snapshot;
         }
-        Err(e) => {
-            app.set_status(format!(
-                "Entry updated (warning: could not reload history: {})",
-                e
-            ));
-            return Ok(());
-        }
+        app.rebuild_history_list();
+        return Err(e);
     }
 
     app.set_status("Entry updated".to_string());
@@ -1086,7 +1157,10 @@ mod tests {
         handle_confirm_delete(&mut app, &mut client).await;
 
         assert_eq!(app.current_view, View::History);
-        assert!(app.status_message.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Entry deleted")
+        );
         assert!(app
             .time_entries
             .iter()

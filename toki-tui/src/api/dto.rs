@@ -54,7 +54,9 @@ pub struct UpdateActiveTimerRequest {
 pub struct EditEntryRequest<'a> {
     pub project_registration_id: &'a str,
     pub project_id: &'a str,
+    pub project_name: &'a str,
     pub activity_id: &'a str,
+    pub activity_name: &'a str,
     pub start_time: String,
     pub end_time: String,
     pub user_note: &'a str,

@@ -157,6 +157,14 @@ pub(super) fn handle_timer_key(key: KeyEvent, app: &mut App, action_tx: &ActionT
                 enqueue_action(action_tx, Action::ResumeEntry(entry));
             }
         }
+        // Ctrl+L when the note field is focused: open/edit log for the running timer
+        KeyCode::Char('l') | KeyCode::Char('L')
+            if !is_editing_this_week(app)
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+                && app.focused_box == app::FocusedBox::Description =>
+        {
+            enqueue_action(action_tx, Action::OpenLogNote);
+        }
         KeyCode::Char('l') | KeyCode::Char('L')
             if !is_editing_this_week(app)
                 && key.modifiers.contains(KeyModifiers::CONTROL)
