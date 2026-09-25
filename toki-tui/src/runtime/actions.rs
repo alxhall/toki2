@@ -3,7 +3,7 @@ use crate::app::{self, App};
 use crate::pending_save::{self, PendingSave, SaveMode};
 use crate::types;
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::action_queue::{Action, ActionTx};
@@ -94,7 +94,7 @@ pub(super) async fn run_action(
             handle_start_timer(app, client).await?;
         }
         Action::SaveTimer => {
-            handle_save_timer_with_action(app, client).await?;
+            app.set_status("Save must be scheduled by the UI event loop".to_string());
         }
         Action::SyncRunningTimerNote { note } => {
             sync_running_timer_note(note, app, client).await;
@@ -269,12 +269,12 @@ async fn handle_activity_selection_enter(
     }
 }
 
-fn apply_recent_history(app: &mut App, entries: Vec<types::TimeEntry>) {
+pub(super) fn apply_recent_history(app: &mut App, entries: Vec<types::TimeEntry>) {
     app.update_history(entries);
     app.rebuild_history_list();
 }
 
-async fn fetch_recent_history(client: &mut ApiClient) -> Result<Vec<types::TimeEntry>> {
+pub(super) async fn fetch_recent_history(client: &mut ApiClient) -> Result<Vec<types::TimeEntry>> {
     let today = time::OffsetDateTime::now_utc().date();
     let month_ago = today - time::Duration::days(30);
     client.get_time_entries(month_ago, today).await
@@ -503,33 +503,46 @@ async fn resume_entry(entry: types::TimeEntry, app: &mut App, client: &mut ApiCl
     }
 }
 
-pub(super) async fn handle_save_timer_with_action(
-    app: &mut App,
-    client: &mut ApiClient,
-) -> Result<()> {
+pub(super) struct SaveAttempt {
+    path: PathBuf,
+    pending: PendingSave,
+    note: Option<String>,
+    start_args: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ),
+    duration_str: String,
+    project_display: String,
+    activity_display: String,
+}
+
+pub(super) enum SaveOutcome {
+    Uncertain(String),
+    Confirmed { restart: Option<Result<(), String>> },
+}
+
+pub(super) fn prepare_save(app: &mut App) -> Option<SaveAttempt> {
     if app.selected_save_action == app::SaveAction::Cancel {
         app.navigate_to(app::View::Timer);
-        return Ok(());
+        return None;
     }
     let path = match pending_save::path() {
         Ok(path) => path,
         Err(e) => {
             app.navigate_to(app::View::Timer);
             app.set_status(format!("Cannot save without a recovery record: {}", e));
-            return Ok(());
+            return None;
         }
     };
-    handle_save_timer_with_action_at(app, client, &path).await
+    prepare_save_at(app, &path)
 }
 
-async fn handle_save_timer_with_action_at(
-    app: &mut App,
-    client: &mut ApiClient,
-    path: &Path,
-) -> Result<()> {
+fn prepare_save_at(app: &mut App, path: &Path) -> Option<SaveAttempt> {
     if app.selected_save_action == app::SaveAction::Cancel {
         app.navigate_to(app::View::Timer);
-        return Ok(());
+        return None;
     }
     let Some(timer_started_at) = app
         .absolute_start
@@ -537,7 +550,7 @@ async fn handle_save_timer_with_action_at(
     else {
         app.navigate_to(app::View::Timer);
         app.set_status("No running timer to save".to_string());
-        return Ok(());
+        return None;
     };
     let mode = match app.selected_save_action {
         app::SaveAction::SaveAndStop => SaveMode::Stop,
@@ -557,85 +570,128 @@ async fn handle_save_timer_with_action_at(
             "Cannot save: previous attempt may be unresolved ({})",
             e
         ));
-        return Ok(());
+        return None;
     }
 
     let duration = app.elapsed_duration();
-    let note = {
-        let full = app.full_note_value();
-        if full.is_empty() {
-            None
-        } else {
-            Some(full)
-        }
+    let full_note = app.full_note_value();
+    let note = (!full_note.is_empty()).then_some(full_note);
+    let start_args = if mode == SaveMode::ContinueSame {
+        (
+            app.selected_project.as_ref().map(|p| p.id.clone()),
+            app.selected_project.as_ref().map(|p| p.name.clone()),
+            app.selected_activity.as_ref().map(|a| a.id.clone()),
+            app.selected_activity.as_ref().map(|a| a.name.clone()),
+        )
+    } else {
+        (None, None, None, None)
     };
-    let project_display = app.current_project_name();
-    let activity_display = app.current_activity_name();
-    let duration_str = format!(
-        "{:02}:{:02}:{:02}",
-        duration.as_secs() / 3600,
-        (duration.as_secs() % 3600) / 60,
-        duration.as_secs() % 60
-    );
-    // The server saves project/activity from its active timer, not this request.
-    if let Err(e) = client
-        .save_timer(SaveTimerRequest { user_note: note })
-        .await
-    {
-        app.navigate_to(app::View::Timer);
-        app.set_status(format!(
-            "Save outcome unknown ({}). Do not retry until verified.",
-            e
-        ));
-        return Ok(());
-    }
-
-    // The API confirmed the entry. A failed cleanup still blocks later saves safely.
-    app.stop_timer(app.auto_resize_timer);
     app.navigate_to(app::View::Timer);
-    if let Err(e) = pending_save::clear(path, &pending) {
-        app.set_status(format!("Saved, but could not clear recovery record: {}", e));
-        return Ok(());
-    }
+    app.set_status("Saving... press q to quit safely; verify the result on restart".to_string());
+    Some(SaveAttempt {
+        path: path.to_owned(),
+        pending,
+        note,
+        start_args,
+        duration_str: format!(
+            "{:02}:{:02}:{:02}",
+            duration.as_secs() / 3600,
+            (duration.as_secs() % 3600) / 60,
+            duration.as_secs() % 60
+        ),
+        project_display: app.current_project_name(),
+        activity_display: app.current_activity_name(),
+    })
+}
 
-    match mode {
-        SaveMode::Stop => {
+pub(super) async fn perform_save(client: &mut ApiClient, attempt: &SaveAttempt) -> SaveOutcome {
+    // A deadline can stop waiting, but cannot prove the server did not commit.
+    match tokio::time::timeout(
+        Duration::from_secs(30),
+        client.save_timer(SaveTimerRequest {
+            user_note: attempt.note.clone(),
+        }),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return SaveOutcome::Uncertain(e.to_string()),
+        Err(_) => return SaveOutcome::Uncertain("save request timed out".to_string()),
+    }
+    let restart = if attempt.pending.mode == SaveMode::Stop {
+        None
+    } else {
+        let (project_id, project_name, activity_id, activity_name) = attempt.start_args.clone();
+        Some(
+            match tokio::time::timeout(
+                Duration::from_secs(30),
+                client.start_timer(project_id, project_name, activity_id, activity_name, None),
+            )
+            .await
+            {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("restart request timed out".to_string()),
+            },
+        )
+    };
+    SaveOutcome::Confirmed { restart }
+}
+
+/// Apply only the API-confirmed result. Returns true if history should be refreshed.
+pub(super) fn finish_save(app: &mut App, attempt: SaveAttempt, outcome: SaveOutcome) -> bool {
+    let SaveOutcome::Confirmed { restart } = outcome else {
+        if let SaveOutcome::Uncertain(error) = outcome {
             app.set_status(format!(
-                "Saved {} to {} / {}",
-                duration_str, project_display, activity_display
+                "Save outcome unknown ({}). Do not retry until verified.",
+                error
             ));
         }
-        SaveMode::ContinueSame | SaveMode::ContinueNew => {
-            let (project_id, project_name, activity_id, activity_name) =
-                if mode == SaveMode::ContinueSame {
-                    (
-                        app.selected_project.as_ref().map(|p| p.id.clone()),
-                        app.selected_project.as_ref().map(|p| p.name.clone()),
-                        app.selected_activity.as_ref().map(|a| a.id.clone()),
-                        app.selected_activity.as_ref().map(|a| a.name.clone()),
-                    )
-                } else {
-                    app.selected_project = None;
-                    app.selected_activity = None;
-                    (None, None, None, None)
-                };
-            app.description_input.clear();
-            app.description_is_default = true;
-            if let Err(e) = client
-                .start_timer(project_id, project_name, activity_id, activity_name, None)
-                .await
-            {
-                app.set_status(format!("Saved, but could not confirm restart: {}", e));
-            } else {
-                app.start_timer(app.auto_resize_timer);
-                app.set_status(format!(
-                    "Saved {} to {} / {}",
-                    duration_str, project_display, activity_display
-                ));
-            }
+        return false;
+    };
+
+    app.stop_timer(app.auto_resize_timer);
+    if let Err(e) = pending_save::clear(&attempt.path, &attempt.pending) {
+        app.set_status(format!("Saved, but could not clear recovery record: {}", e));
+        return true;
+    }
+    if attempt.pending.mode != SaveMode::Stop {
+        app.description_input.clear();
+        app.description_is_default = true;
+        if attempt.pending.mode == SaveMode::ContinueNew {
+            app.selected_project = None;
+            app.selected_activity = None;
         }
     }
-    refresh_history_background(app, client).await;
+    match restart {
+        Some(Ok(())) => {
+            app.start_timer(app.auto_resize_timer);
+            app.set_status(format!(
+                "Saved {} to {} / {}",
+                attempt.duration_str, attempt.project_display, attempt.activity_display
+            ));
+        }
+        Some(Err(e)) => app.set_status(format!("Saved, but could not confirm restart: {}", e)),
+        None => app.set_status(format!(
+            "Saved {} to {} / {}",
+            attempt.duration_str, attempt.project_display, attempt.activity_display
+        )),
+    }
+    true
+}
+
+#[cfg(test)]
+async fn handle_save_timer_with_action_at(
+    app: &mut App,
+    client: &mut ApiClient,
+    path: &Path,
+) -> Result<()> {
+    if let Some(attempt) = prepare_save_at(app, path) {
+        let outcome = perform_save(client, &attempt).await;
+        if finish_save(app, attempt, outcome) {
+            refresh_history_background(app, client).await;
+        }
+    }
     Ok(())
 }
 
@@ -1186,7 +1242,8 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = [0; 2048];
-            socket.read(&mut request).await.unwrap();
+            let received = socket.read(&mut request).await.unwrap();
+            assert!(received > 0);
             socket
                 .write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
                 .await
@@ -1229,6 +1286,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn confirmed_save_with_failed_restart_does_not_fabricate_a_running_timer() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = ApiClient::new(
+            &format!("http://{}", listener.local_addr().unwrap()),
+            "test",
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            for response in [
+                b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}".as_slice(),
+                b"HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".as_slice(),
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 2048];
+                let received = socket.read(&mut request).await.unwrap();
+                assert!(received > 0);
+                socket.write_all(response).await.unwrap();
+            }
+        });
+        let mut app = test_app();
+        app.start_timer(false);
+        app.selected_save_action = SaveAction::ContinueSameProject;
+        let path = std::env::temp_dir().join(format!("toki-restart-error-{}", std::process::id()));
+        let attempt = prepare_save_at(&mut app, &path).unwrap();
+        let outcome = perform_save(&mut client, &attempt).await;
+        assert!(matches!(
+            outcome,
+            SaveOutcome::Confirmed {
+                restart: Some(Err(_))
+            }
+        ));
+        assert!(finish_save(&mut app, attempt, outcome));
+        server.await.unwrap();
+        assert_eq!(app.timer_state, app::TimerState::Stopped);
+        assert_eq!(crate::pending_save::load(&path).unwrap(), None);
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("could not confirm restart"));
+    }
+
+    #[tokio::test]
+    async fn committed_save_with_lost_response_remains_unresolved() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = ApiClient::new(
+            &format!("http://{}", listener.local_addr().unwrap()),
+            "test",
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 2048];
+            let received = socket.read(&mut request).await.unwrap();
+            assert!(received > 0);
+            // The provider may have committed; the response never reaches the client.
+        });
+        let mut app = test_app();
+        app.start_timer(false);
+        app.selected_save_action = SaveAction::SaveAndStop;
+        app.description_input = app::TextInput::from_str("Keep this note");
+        let original_start = app.absolute_start;
+        let path = std::env::temp_dir().join(format!("toki-lost-response-{}", std::process::id()));
+        let attempt = prepare_save_at(&mut app, &path).unwrap();
+        let outcome = perform_save(&mut client, &attempt).await;
+        assert!(matches!(outcome, SaveOutcome::Uncertain(_)));
+        assert!(!finish_save(&mut app, attempt, outcome));
+        server.await.unwrap();
+        assert_eq!(app.timer_state, app::TimerState::Running);
+        assert_eq!(app.absolute_start, original_start);
+        assert_eq!(app.description_input.value, "Keep this note");
+        let pending = crate::pending_save::load(&path).unwrap().unwrap();
+        assert!(prepare_save_at(&mut app, &path).is_none());
+        crate::pending_save::clear(&path, &pending).unwrap();
+    }
+
+    #[tokio::test]
     async fn handle_save_timer_cancel_returns_to_timer_without_saving() {
         let mut app = test_app();
         let mut client = ApiClient::dev().expect("dev client");
@@ -1236,7 +1374,8 @@ mod tests {
         app.selected_save_action = SaveAction::Cancel;
         app.timer_state = app::TimerState::Running;
 
-        handle_save_timer_with_action(&mut app, &mut client)
+        let path = std::env::temp_dir().join(format!("toki-cancel-save-{}", std::process::id()));
+        handle_save_timer_with_action_at(&mut app, &mut client, &path)
             .await
             .expect("cancel should succeed");
 

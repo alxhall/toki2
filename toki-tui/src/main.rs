@@ -96,6 +96,16 @@ async fn run_real_mode() -> Result<()> {
 
 async fn run_ui(mut app: App, mut client: ApiClient) -> Result<()> {
     bootstrap::initialize_app_state(&mut app, &mut client).await;
+    match pending_save::path().and_then(|path| pending_save::load(&path)) {
+        Ok(Some(_)) => app.set_status(
+            "A prior save has an unresolved outcome. Do not retry until verified.".to_string(),
+        ),
+        Err(e) => app.set_status(format!(
+            "Cannot inspect save recovery record: {}. Saves are disabled.",
+            e
+        )),
+        Ok(None) => {}
+    }
 
     let result = {
         let mut terminal = terminal::TerminalGuard::new()?;
@@ -106,6 +116,13 @@ async fn run_ui(mut app: App, mut client: ApiClient) -> Result<()> {
         eprintln!("Error: {:?}", err);
     }
 
+    match pending_save::path().and_then(|path| pending_save::load(&path)) {
+        Ok(Some(_)) => {
+            println!("\nA save may have committed. Do not retry until its outcome is verified.")
+        }
+        Err(e) => eprintln!("Could not inspect the save recovery record: {}", e),
+        Ok(None) => {}
+    }
     println!("\nGoodbye!");
     Ok(())
 }
