@@ -4,8 +4,9 @@
 Linux/macOS PTY harness for the released TUI behavior. Run from repo root:
     python3 tasks/repro_slow_save.py target/release/toki-tui
 
-A controlled HTTP server holds PUT /time-tracking/timer until the script releases it.
-No production requests or real credentials are used. Windows must be tested separately.
+A controlled HTTP server can hold the save or the subsequent history refresh,
+return 500, or drop the save response after receiving the request. No production
+requests or real credentials are used. Windows must be tested separately.
 """
 
 import datetime
@@ -13,6 +14,7 @@ import http.server
 import os
 import pty
 import select
+import socket
 import struct
 import subprocess
 import sys
@@ -49,6 +51,9 @@ class Stub(http.server.BaseHTTPRequestHandler):
                 "hours": 0, "minutes": 0, "seconds": 0,
             }})
         elif self.path.startswith("/time-tracking/time-entries"):
+            if self.server.mode == "slow-refresh" and self.server.save_seen.is_set():
+                self.server.refresh_seen.set()
+                self.server.release_save.wait(timeout=15)
             self.respond([])
         elif self.path == "/time-tracking/projects":
             self.respond([{"projectId": "p1", "projectName": "Test project"}])
@@ -66,18 +71,27 @@ class Stub(http.server.BaseHTTPRequestHandler):
             return
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
         self.server.save_seen.set()
-        self.server.release_save.wait(timeout=15)
-        self.respond({"entry": {"registrationId": "r1"}, "timer": None})
+        if self.server.mode != "slow-refresh":
+            self.server.release_save.wait(timeout=15)
+        if self.server.mode == "lost-response":
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+        elif self.server.mode == "server-error":
+            self.send_error(500)
+        else:
+            self.respond({"entry": {"registrationId": "r1"}, "timer": None})
 
 
-def main(binary, require_responsive=False):
+def main(binary, mode="slow-save", require_responsive=False):
     with tempfile.TemporaryDirectory(prefix="toki-slow-save-") as tmp:
         os.makedirs(os.path.join(tmp, "toki-tui"))
         with open(os.path.join(tmp, "toki-tui", "session"), "w", encoding="utf-8") as session:
             session.write("dummy-local-session")
 
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stub)
+        server.mode = mode
         server.save_seen = threading.Event()
+        server.refresh_seen = threading.Event()
         server.release_save = threading.Event()
         threading.Thread(target=server.serve_forever, daemon=True).start()
         master, slave = pty.openpty()
@@ -111,17 +125,19 @@ def main(binary, require_responsive=False):
             os.write(master, b"1")  # save and stop
             if not server.save_seen.wait(5):
                 raise RuntimeError("No PUT /time-tracking/timer after Ctrl+S, 1")
+            if mode == "slow-refresh" and not server.refresh_seen.wait(5):
+                raise RuntimeError("No history refresh after successful save")
             os.write(master, b"q")
             time.sleep(0.5)
             blocked = process.poll() is None
-            print(f"Save request held; quit input processed within 0.5s: {not blocked}")
+            print(f"{mode} response held; quit input processed within 0.5s: {not blocked}")
             server.release_save.set()
             process.wait(timeout=5)
-            print(f"Exited after save was released; return code: {process.returncode}")
+            print(f"Exited after stub response was released; return code: {process.returncode}")
             if not blocked:
-                print("No input stall observed (expected after an off-loop save fix).")
+                print("No input stall observed (expected after an off-loop I/O fix).")
             else:
-                print("Reproduced 0.4.0 input stall while awaiting the save response.")
+                print(f"Reproduced 0.4.0 input stall during {mode}.")
             if require_responsive and blocked:
                 raise AssertionError("TUI ignored quit input while save was pending")
         finally:
@@ -140,6 +156,11 @@ def main(binary, require_responsive=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--require-responsive"):
-        sys.exit("usage: python3 tasks/repro_slow_save.py path/to/toki-tui [--require-responsive]")
-    main(os.path.abspath(sys.argv[1]), require_responsive="--require-responsive" in sys.argv[2:])
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary")
+    parser.add_argument("--mode", choices=("slow-save", "lost-response", "server-error", "slow-refresh"), default="slow-save")
+    parser.add_argument("--require-responsive", action="store_true")
+    args = parser.parse_args()
+    main(os.path.abspath(args.binary), mode=args.mode, require_responsive=args.require_responsive)
