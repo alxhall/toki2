@@ -70,7 +70,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
         self.respond({"entry": {"registrationId": "r1"}, "timer": None})
 
 
-def main(binary):
+def main(binary, require_responsive=False):
     with tempfile.TemporaryDirectory(prefix="toki-slow-save-") as tmp:
         os.makedirs(os.path.join(tmp, "toki-tui"))
         with open(os.path.join(tmp, "toki-tui", "session"), "w", encoding="utf-8") as session:
@@ -122,6 +122,8 @@ def main(binary):
                 print("No input stall observed (expected after an off-loop save fix).")
             else:
                 print("Reproduced 0.4.0 input stall while awaiting the save response.")
+            if require_responsive and blocked:
+                raise AssertionError("TUI ignored quit input while save was pending")
         finally:
             server.release_save.set()
             if process.poll() is None:
@@ -138,6 +140,6 @@ def main(binary):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: python3 tasks/repro_slow_save.py path/to/toki-tui")
-    main(os.path.abspath(sys.argv[1]))
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--require-responsive"):
+        sys.exit("usage: python3 tasks/repro_slow_save.py path/to/toki-tui [--require-responsive]")
+    main(os.path.abspath(sys.argv[1]), require_responsive="--require-responsive" in sys.argv[2:])

@@ -33,9 +33,15 @@ Test-first change `d827326` removes unsupported project/activity fields from the
 
 `python3 tasks/repro_slow_save.py target/release/toki-tui` uses a loopback HTTP stub, a throwaway config/session directory, and a draining PTY; it never contacts production or stores terminal output. With the original 0.4.0 release build, after the stub received `PUT /time-tracking/timer` and held the response, sending `q` **did not exit within 0.5 s**. Releasing the response let the TUI exit normally (status 0). This confirms an event-loop input stall during a slow save on Linux; it does **not** explain which Windows process held 25 GB or prove save idempotency. The script is a manual reproduction fixture, not yet a pass/fail CI regression test.
 
+The optional `--require-responsive` switch turns the PTY harness into an expected-to-fail regression check on 0.4.0: it exited nonzero with `TUI ignored quit input while save was pending`. It is not wired into CI until the off-loop behavior is implemented. For a safe native-Windows starting point, `tasks/windows-memory-sample.ps1` samples the TUI, Windows Terminal, OpenConsole, conhost and wslhost separately every 10 s for up to 15 min; it stops sampling on ≥1 GiB growth or ≥2 GiB private memory and warns the tester to close the TUI manually. Linux cannot validate the PowerShell script or reproduce native Windows behavior.
+
+## Test-environment decision
+
+The repository's `.docs/kleer.md` **does** document Kleer's isolated `https://test-api.kleer.se/v1`: writes there do not appear in the normal `my.kleer.se` admin UI, even for matching company/user IDs. A local Toki API can select this through `TOKI_KLEER__BASE_URL`, but it also needs a local database, server-side Kleer service-account configuration, OAuth and a local user mapping. I found no ready-to-use Toki staging URL or disposable account in this repo. Therefore no production write is necessary for the initial local stub and contract work. If a local end-to-end environment proves impractical, agree on a specific disposable production account/project and cleanup with the user before any live mutation; **do not extract or print credentials**.
+
 ## Pending checkpoint A work
 
-1. Extend the local stub for committed/lost response, explicit failure and slow history refresh; convert the expected behavior into a failing regression test before modifying the event loop.
-2. Ask for an approved staging/test account before authenticated reads or writes; establish whether the deployed server preserves project/activity edits made immediately before save.
-3. Obtain native-Windows build/reproduction: per-process samples for TUI vs terminal, using an early stop limit. Do not run an unattended multi-hour, multi-GB test.
+1. Extend the local stub for committed/lost response, explicit failure and slow history refresh; keep the responsiveness assertion red until the event-loop change makes it green.
+2. Establish an authenticated test environment and verify project/activity sync-before-save and response semantics without unapproved production writes.
+3. Have the native-Windows tester run a short idle/running-timer sample and send process-level readings; do not run an unattended multi-hour, multi-GB test.
 4. Decide how to address the pre-existing strict Clippy failures as a separate small baseline cleanup before treating strict lint as a gate.
