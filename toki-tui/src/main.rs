@@ -7,6 +7,7 @@ mod editor;
 mod git;
 mod log_notes;
 mod login;
+mod pending_save;
 mod runtime;
 mod session_store;
 mod terminal;
