@@ -27,16 +27,16 @@ Plan and decision gates: [`tasks/plan.md`](plan.md). **Approved; Phase 0 underwa
 
 ### 1.1 Model one in-flight save and explicit outcome states
 - [ ] Represent idle, saving, confirmed, uncertain and failed states; make duplicate save keys single-flight without discarding edit context.
-- [ ] Keep status and relevant keys usable; decide what quitting during saving shows and what must survive restart.
+- [ ] Before sending a write, persist minimal, restricted pending metadata without note text, cookie or token. Refuse to write if persistence fails; recognize unfinished attempts after restart. Keep status and relevant keys usable, and make quit while saving explicit/safe.
 **Depends on:** 0.3. **Verification:** state-transition tests for repeated save, cancel/quit and explicit failure; `SQLX_OFFLINE=true cargo test -p toki-tui`. **Likely files:** `toki-tui/src/app/{mod,state}.rs`, `toki-tui/src/runtime/views/*`, focused UI tests. **Size:** M.
 
 ### 1.2 Keep I/O off the event loop
-- [ ] Dispatch save and its result through bounded/coalesced work without awaiting HTTP in the render/input loop; prevent polling from queuing unlimited history refreshes.
+- [ ] Only after the durable guard exists, dispatch save and its result through bounded/coalesced work without awaiting HTTP in the render/input loop; prevent polling from queuing unlimited history refreshes.
 - [ ] Serialize timer mutations; ignore stale read completions rather than letting them overwrite a newer timer. Add visible progress and finite request deadlines.
 **Depends on:** 1.1. **Verification:** 10-second fixture yields responsive redraw/keypress feedback (target <250 ms for local UI handling), one save request per intended action, no growing queue; `SQLX_OFFLINE=true cargo test -p toki-tui`. **Likely files:** `toki-tui/src/runtime/{event_loop,action_queue,actions}.rs`, `toki-tui/src/api/client.rs`, UI status. **Size:** M; split implementation into separate dispatch and bounded-poll changes if it exceeds one focused session.
 
 ### 1.3 Reconcile ambiguous save outcomes
-- [ ] On deadline/network loss, compare the server's active timer and recent entries with the attempted save; do not automatically retry a non-idempotent write.
+- [ ] On deadline/network loss **or 500 after a possible provider commit**, retain the pending marker and compare the server's active timer and recent entries with the attempted save; do not automatically retry a non-idempotent write.
 - [ ] If still ambiguous/offline, retain non-secret pending context, show an explicit unknown state, and reconcile at reconnect/startup before permitting unsafe replay.
 **Depends on:** 1.2. **Verification:** tests cover successful response, explicit no-write failure, committed/lost-response, offline-after-timeout and app restart; no duplicated entries. If conclusive reconciliation is impossible, capture a backend idempotency/lookup decision for review instead of faking certainty. **Likely files:** `toki-tui/src/runtime/actions.rs`, `toki-tui/src/api/client.rs`, `toki-tui/src/session_store.rs` (or a separate non-secret pending-state store). **Size:** M per sub-slice; split if backend support is required.
 
