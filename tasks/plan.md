@@ -1,6 +1,6 @@
 # Toki TUI recovery and next-release plan
 
-**Status:** approved for execution; baseline underway (see [`tasks/baseline.md`](baseline.md)); no save behavior changed yet. **Implementation base:** `release/v0.4.0` (not the current checkout's `master`). **Delivery:** fork-owned TUI releases; no upstream TUI PRs required. **Audience:** the three daily TUI users, including a native Windows tester. **Task details:** [`tasks/todo.md`](todo.md). The existing TUI bugs are recorded in the local Aven project; this plan does not create, reprioritize, or close Aven tasks.
+**Status:** approved for execution; Phase 1 in progress (see [`tasks/baseline.md`](baseline.md)); save changes are isolated and **not release-ready**. **Implementation base:** `release/v0.4.0` (not the current checkout's `master`). **Delivery:** fork-owned TUI releases; no upstream TUI PRs required. **Audience:** the three daily TUI users, including a native Windows tester. **Task details:** [`tasks/todo.md`](todo.md). The existing TUI bugs are recorded in the local Aven project; this plan does not create, reprioritize, or close Aven tasks.
 
 ## Goal and boundaries
 
