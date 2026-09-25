@@ -28,11 +28,17 @@ while (((Get-Date) - $start).TotalSeconds -lt $Seconds) {
             $private = [long]$p.PrivateMemorySize64
             if (-not $baseline.ContainsKey($key)) { $baseline[$key] = $private }
             $stamp = (Get-Date).ToUniversalTime().ToString('o')
+            $cpuSeconds = if ($null -ne $p.CPU) {
+                ([double]$p.CPU).ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
+            } else { '' }
             '{0},{1},{2},{3},{4},{5},{6},{7}' -f $stamp, $Scenario, $p.ProcessName,
-                $p.Id, $private, $p.WorkingSet64, $p.Handles, $p.CPU.TotalSeconds
+                $p.Id, $private, $p.WorkingSet64, $p.Handles, $cpuSeconds
 
-            if ($private -ge 2 * $gib -or $private - $baseline[$key] -ge $gib) {
-                Write-Warning "Safety limit reached for $($p.ProcessName) PID $($p.Id). Stop the TUI manually; do not let it reach multi-GB usage."
+            if ($private -ge 2 * $gib) {
+                Write-Warning "Absolute safety limit reached for $($p.ProcessName) PID $($p.Id) (may predate this sample; no growth proven). Close the test TUI manually."
+                $stop = $true
+            } elseif ($private - $baseline[$key] -ge $gib) {
+                Write-Warning "Private memory grew by at least 1 GiB for $($p.ProcessName) PID $($p.Id). Close the test TUI manually."
                 $stop = $true
             }
         } catch {
