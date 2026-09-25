@@ -29,9 +29,16 @@ All commands are available via the binary directly (`toki-tui <command>`) or thr
 | `login` | `just tui-login` | Authenticate via browser OAuth |
 | `logout` | `just tui-logout` | Clear saved session |
 | `status` | `just tui-status` | Show current login status |
+| `resolve-save` | — | Review an unresolved save before clearing its local guard |
 | `config-path` | `just tui-config` | Print config path; create default file if missing |
 | `logs-path` | `just tui-logs` | Print the log notes directory path |
 | `version` | `just tui-version` | Print the current version |
+
+## Recovering an uncertain save
+
+If a save times out, loses its response, or you quit while it is in progress, the TUI retains a local recovery record and **does not retry automatically**. The server might already have created the entry. Timer-changing actions are blocked until the outcome has been reviewed; press `h` to inspect recent history or `q` to exit.
+
+Close all TUI instances, then run `toki-tui resolve-save` while logged into the **same account**. It reads the server's active timer and recent entries; compare them with the attempted timer and check the web app if the listing is inconclusive. Recent entries may lack a start time and cannot always be uniquely matched. If you cannot tell whether the entry was saved, **do not clear the guard or retry**. After verifying the outcome, type the exact confirmation phrase shown by the command. This clears **only the local guard**; it does not save, delete or restart anything. The 0.4.0 binary predates this recovery command.
 
 ## Configuration
 

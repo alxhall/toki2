@@ -121,6 +121,32 @@ def main(binary, mode="slow-save", require_responsive=False):
                     break
 
         threading.Thread(target=drain, args=(master, stop_drain), daemon=True).start()
+
+        def invoke_recovery(answer):
+            recovery_master, recovery_slave = pty.openpty()
+            child = subprocess.Popen([binary, "resolve-save"], stdin=recovery_slave,
+                                     stdout=recovery_slave, stderr=recovery_slave,
+                                     env=env, start_new_session=True)
+            os.close(recovery_slave)
+            try:
+                output = bytearray()
+                deadline = time.monotonic() + 5
+                while b"CLEAR VERIFIED" not in output and time.monotonic() < deadline:
+                    ready, _, _ = select.select([recovery_master], [], [], 0.1)
+                    if ready:
+                        output.extend(os.read(recovery_master, 8192))
+                        del output[:-8192]
+                    if child.poll() is not None:
+                        break
+                assert b"CLEAR VERIFIED" in output, "Recovery did not reach the verification prompt"
+                os.write(recovery_master, answer)
+                assert child.wait(timeout=5) == 0, "Recovery command failed"
+            finally:
+                if child.poll() is None:
+                    child.terminate()
+                    child.wait(timeout=2)
+                os.close(recovery_master)
+
         try:
             time.sleep(1.5)  # bootstrap finishes before issuing save
             if process.poll() is not None:
@@ -132,6 +158,11 @@ def main(binary, mode="slow-save", require_responsive=False):
                 raise RuntimeError("No PUT /time-tracking/timer after Ctrl+S, 1")
             if mode == "slow-refresh" and not server.refresh_seen.wait(5):
                 raise RuntimeError("No history refresh after successful save")
+            if require_responsive:
+                concurrent = subprocess.run([binary, "resolve-save"], env=env,
+                                            stdin=subprocess.DEVNULL, capture_output=True,
+                                            timeout=5, check=False)
+                assert concurrent.returncode != 0, "Recovery ran while the TUI still held its lock"
             if mode == "deferred-history":
                 os.write(master, b"h")
                 time.sleep(0.2)
@@ -186,6 +217,19 @@ def main(binary, mode="slow-save", require_responsive=False):
                         process2.wait(timeout=2)
                     stop2.set()
                     os.close(master2)
+            if require_responsive and mode == "lost-response":
+                import json
+                with open(marker, encoding="utf-8") as pending_file:
+                    pending = json.load(pending_file)
+                timestamp = int(datetime.datetime.fromisoformat(
+                    pending["attempted_at"].replace("Z", "+00:00")).timestamp())
+                phrase = f"CLEAR VERIFIED {pending['user_id']} {timestamp}\n".encode()
+                invoke_recovery(b"no\n")
+                assert os.path.exists(marker), "A refusal cleared the recovery record"
+                invoke_recovery(phrase)
+                assert not os.path.exists(marker), "Explicit verification failed to clear the guard"
+                assert server.save_requests == 1, "Recovery replayed the save"
+                print("Interactive recovery refused then cleared only the local guard")
         finally:
             server.release_save.set()
             if process.poll() is None:

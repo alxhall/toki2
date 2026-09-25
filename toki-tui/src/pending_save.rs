@@ -29,6 +29,29 @@ pub fn path() -> Result<PathBuf> {
         .join("pending-save.json"))
 }
 
+/// Hold this OS lock for the lifetime of the TUI or a recovery session. The lock
+/// file stays on disk; the operating system releases its lock after a crash.
+pub fn lock() -> Result<std::fs::File> {
+    lock_at(&path()?.with_file_name("tui.lock"))
+}
+
+fn lock_at(lock_path: &Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(lock_path.parent().context("Missing lock directory")?)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(lock_path)
+        .context("Cannot open TUI lock file")?;
+    file.try_lock()
+        .context("Another TUI or recovery session is using this config; close it first")?;
+    Ok(file)
+}
+
 /// The file is created exclusively and synced *before* a request is sent.
 /// An existing or malformed record must never be replaced by a later attempt.
 pub fn begin(path: &Path, pending: &PendingSave) -> Result<()> {
@@ -127,6 +150,17 @@ mod tests {
         std::fs::write(&path, b"{incomplete").unwrap();
         assert!(load(&path).is_err());
         assert!(begin(&path, &attempt()).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn concurrent_recovery_or_tui_is_rejected_until_lock_is_released() {
+        let path = test_path();
+        let first = lock_at(&path).unwrap();
+        assert!(lock_at(&path).is_err());
+        drop(first);
+        let second = lock_at(&path).unwrap();
+        drop(second);
         std::fs::remove_file(path).unwrap();
     }
 

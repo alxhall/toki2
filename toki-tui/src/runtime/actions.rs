@@ -567,7 +567,7 @@ fn prepare_save_at(app: &mut App, path: &Path) -> Option<SaveAttempt> {
     if let Err(e) = pending_save::begin(path, &pending) {
         app.navigate_to(app::View::Timer);
         app.set_status(format!(
-            "Cannot save: previous attempt may be unresolved ({})",
+            "Cannot save: previous attempt unresolved or recovery record unavailable ({})",
             e
         ));
         return None;
@@ -1146,6 +1146,23 @@ mod tests {
         assert!(app.absolute_start.is_some());
         assert!(app.local_start.is_some());
         assert!(app.status_message.is_none());
+    }
+
+    #[test]
+    fn save_refuses_before_network_if_the_recovery_record_cannot_be_created() {
+        let mut app = test_app();
+        app.start_timer(false);
+        app.selected_save_action = SaveAction::SaveAndStop;
+        let original_start = app.absolute_start;
+        // A directory is not a writable recovery file, on Unix or Windows.
+        assert!(prepare_save_at(&mut app, &std::env::temp_dir()).is_none());
+        assert_eq!(app.timer_state, app::TimerState::Running);
+        assert_eq!(app.absolute_start, original_start);
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("recovery record unavailable"));
     }
 
     #[tokio::test]

@@ -8,6 +8,7 @@ mod git;
 mod log_notes;
 mod login;
 mod pending_save;
+mod recovery;
 mod runtime;
 mod session_store;
 mod terminal;
@@ -48,6 +49,7 @@ async fn main() -> Result<()> {
             };
             println!("Azure AD: {}", session_status);
         }
+        Commands::ResolveSave => recovery::run().await?,
         Commands::Login => {
             let cfg = config::TokiConfig::load()?;
             login::run_login(&cfg.api_url).await?;
@@ -95,10 +97,12 @@ async fn run_real_mode() -> Result<()> {
 }
 
 async fn run_ui(mut app: App, mut client: ApiClient) -> Result<()> {
+    let _lock = pending_save::lock()?;
     bootstrap::initialize_app_state(&mut app, &mut client).await;
     match pending_save::path().and_then(|path| pending_save::load(&path)) {
         Ok(Some(_)) => app.set_status(
-            "A prior save has an unresolved outcome. Do not retry until verified.".to_string(),
+            "Save outcome unknown. Press h for history; quit and run toki-tui resolve-save."
+                .to_string(),
         ),
         Err(e) => app.set_status(format!(
             "Cannot inspect save recovery record: {}. Saves are disabled.",
@@ -118,7 +122,7 @@ async fn run_ui(mut app: App, mut client: ApiClient) -> Result<()> {
 
     match pending_save::path().and_then(|path| pending_save::load(&path)) {
         Ok(Some(_)) => {
-            println!("\nA save may have committed. Do not retry until its outcome is verified.")
+            println!("\nA save may have committed. Run `toki-tui resolve-save` to inspect it before another save.")
         }
         Err(e) => eprintln!("Could not inspect the save recovery record: {}", e),
         Ok(None) => {}

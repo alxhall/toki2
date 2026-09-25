@@ -26,4 +26,6 @@ pub enum Commands {
     Version,
     /// Show current login status
     Status,
+    /// Review a save with an unknown outcome; clear its local guard only after verification
+    ResolveSave,
 }
