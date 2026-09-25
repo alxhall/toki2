@@ -1,5 +1,5 @@
 use crate::api::ApiClient;
-use crate::app::{App, View};
+use crate::app::{App, TimerState, View};
 use crate::pending_save;
 use crate::types::TimeEntry;
 use crate::ui;
@@ -34,21 +34,36 @@ pub async fn run_app(
     let mut unresolved = has_unresolved_save();
     let mut history_task: Option<tokio::task::JoinHandle<Result<Vec<TimeEntry>, String>>> = None;
     let mut history_requested_during_save = false;
+    let mut redraw = true;
+    let mut last_elapsed_second = None;
 
     loop {
-        // Clear before drawing to avoid a flash when the screen needs a full repaint
-        // (e.g. after returning from an external editor or waking from sleep).
-        if app.needs_full_redraw {
-            terminal.clear()?;
-            app.needs_full_redraw = false;
+        // A stopped, unchanged screen should emit no ANSI output. The running
+        // clock only needs one frame per second; input and worker results redraw
+        // immediately. Whether this also bounds Windows Terminal memory still
+        // needs a native before/after measurement.
+        let elapsed_second =
+            (app.timer_state == TimerState::Running).then(|| app.elapsed_duration().as_secs());
+        if redraw
+            || app.needs_full_redraw
+            || app.is_loading
+            || elapsed_second != last_elapsed_second
+        {
+            // Clear before drawing when returning from an external editor or focus loss.
+            if app.needs_full_redraw {
+                terminal.clear()?;
+                app.needs_full_redraw = false;
+            }
+            terminal.draw(|f| ui::render(f, app))?;
+            redraw = false;
+            last_elapsed_second = elapsed_second;
         }
-
-        terminal.draw(|f| ui::render(f, app))?;
 
         if app.is_loading {
             app.throbber_state.calc_next();
             if Instant::now() >= loading_until {
                 app.is_loading = false;
+                redraw = true;
             }
         }
 
@@ -74,16 +89,19 @@ pub async fn run_app(
                     } else {
                         handle_view_key(key, app, &action_tx);
                     }
+                    redraw = true;
                 }
                 // Force a full redraw when the terminal regains focus (e.g. after sleep/wake)
-                Event::FocusGained => {
+                Event::FocusGained | Event::Resize(_, _) => {
                     app.needs_full_redraw = true;
+                    redraw = true;
                 }
                 _ => {}
             }
         }
 
         if save_task.as_ref().is_some_and(|task| task.is_finished()) {
+            redraw = true;
             match save_task.take().unwrap().await {
                 Ok((attempt, outcome)) => {
                     let uncertain = matches!(&outcome, SaveOutcome::Uncertain(_));
@@ -112,6 +130,7 @@ pub async fn run_app(
             }
         }
         if history_task.as_ref().is_some_and(|task| task.is_finished()) {
+            redraw = true;
             match history_task.take().unwrap().await {
                 Ok(Ok(entries)) => apply_recent_history(app, entries),
                 Ok(Err(error)) => app.set_status(format!("Error refreshing history: {}", error)),
@@ -128,6 +147,7 @@ pub async fn run_app(
             let Ok(action) = action_rx.try_recv() else {
                 break;
             };
+            redraw = true;
             match action {
                 Action::SaveTimer => {
                     if unresolved {
