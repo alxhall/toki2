@@ -28,10 +28,23 @@ pub struct StartTimerRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SaveTimerRequest {
     pub user_note: Option<String>,
-    pub project_id: Option<String>,
-    pub project_name: Option<String>,
-    pub activity_id: Option<String>,
-    pub activity_name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SaveTimerRequest;
+
+    #[test]
+    fn save_timer_payload_matches_published_contract() {
+        let request = SaveTimerRequest {
+            user_note: Some("Work note".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({ "userNote": "Work note" })
+        );
+    }
 }
 
 #[derive(Serialize)]
