@@ -79,7 +79,7 @@ Add Aven as an *optional* source in the note picker while retaining Taskwarrior.
 
 1. What exact API version is deployed at the configured production URL, and is `/openapi.json` already there? Use an approved test/staging account for any write probe.
 2. Does saving with immediately changed project/activity persist the desired values on the deployed server? If not, is a confirmed update of the server-side active timer required before save?
-3. Is there enough information in the API to reconcile a timed-out write conclusively? If not, should the backend add idempotency keys or a stronger lookup contract?
+3. The user chose explicit, reviewed manual clearing of an inconclusive local save guard for this reliability slice. The API may lack sufficient identity data to reconcile a timed-out write conclusively, so never auto-clear or replay it. If this happens often, revisit backend idempotency/stronger lookup as a separate project.
 4. Which process actually held the reported 25 GB, and was the tab native Windows, WSL, or a shell with children? What preceded the ~7 GB/hour growth, and what caused input to resume? What Windows memory ceiling should the team agree on after measurement?
 5. For Aven, should notes contain title only or a human-readable local reference? Which workspace/project should the picker show when launched outside a mapped repository?
 6. Who depends on Git note insertion or stored log files, and how will existing logs be retained when editing is removed?

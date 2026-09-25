@@ -1,4 +1,5 @@
-# Read-only native Windows sampler. Start the 0.4.0 TUI first, then run:
+# Read-only native Windows sampler. Start the 0.4.0 release's
+# toki-tui-windows.exe (or a locally renamed toki-tui.exe) first, then run:
 #   .\tasks\windows-memory-sample.ps1 -Scenario idle > .\toki-memory-idle.csv
 # Repeat with -Scenario slow-save or running-timer. No credentials or notes are recorded.
 # The script stops sampling early; CLOSE THE TUI YOURSELF if it warns about growth.
@@ -9,7 +10,8 @@ param(
     [int]$IntervalSeconds = 10
 )
 
-$names = @('toki-tui', 'WindowsTerminal', 'OpenConsole', 'conhost', 'wslhost')
+$tuiNames = @('toki-tui', 'toki-tui-windows')
+$names = $tuiNames + @('WindowsTerminal', 'OpenConsole', 'conhost', 'wslhost')
 $baseline = @{}
 $gib = 1GB
 $start = Get-Date
@@ -20,7 +22,7 @@ while (((Get-Date) - $start).TotalSeconds -lt $Seconds) {
     $stop = $false
     $processes = @(Get-Process -Name $names -ErrorAction SilentlyContinue)
     foreach ($p in $processes) {
-        if ($p.ProcessName -eq 'toki-tui') { $seenTui = $true }
+        if ($p.ProcessName -in $tuiNames) { $seenTui = $true }
         try {
             $key = "{0}:{1}" -f $p.ProcessName, $p.Id
             $private = [long]$p.PrivateMemorySize64
@@ -38,7 +40,7 @@ while (((Get-Date) - $start).TotalSeconds -lt $Seconds) {
         }
     }
     if (-not $seenTui) {
-        Write-Warning 'No native toki-tui.exe found. If using WSL, this only measures Windows host processes; capture Linux RSS separately.'
+        Write-Warning 'No native toki-tui.exe or toki-tui-windows.exe found. WSL processes need separate Linux RSS measurements.'
         break
     }
     if ($stop) { break }
