@@ -92,7 +92,7 @@ Plan and decision gates: [`tasks/plan.md`](plan.md). **Approved; Phase 0 underwa
 **Depends on:** checkpoint D, user confirmation and retention plan. **Verification:** old tagged notes still display correctly and retained logs are accessible; no silent orphaning. **Likely files:** `toki-tui/src/{log_notes,editor}.rs`, app/runtime/UI/tests/README. **Size:** split retention support from removal.
 
 ### 4.4 Triage remaining low-severity bugs
-- [ ] Reproduce/fix the running-entry empty-row indexing bug, then choose among date editing, clearing fields, Delete key support and stats sorting using user impact—not original low-priority labels alone.
+- [ ] After the reliability release, reproduce/fix the running-entry empty-row indexing bug if it is still relevant, then choose among date editing, clearing fields, Delete key support and stats sorting using user impact—not original low-priority labels alone. The user explicitly skipped the empty-row bug for the next release; the existing backlog task remains open.
 **Depends on:** checkpoint D. **Verification:** one regression test per fixed bug, Windows/manual UI checks as applicable, `SQLX_OFFLINE=true cargo test -p toki-tui`. **Likely files:** app history/edit and UI tests. **Size:** one small task per chosen bug; do not bundle them.
 
 **Checkpoint E — Feature release:** Taskwarrior still works, optional Aven works, existing note/log data is safe, and all removed controls are documented. Run cross-platform release builds and user smoke tests.
