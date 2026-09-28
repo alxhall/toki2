@@ -55,6 +55,17 @@ fn lock_at(lock_path: &Path) -> Result<std::fs::File> {
 /// The file is created exclusively and synced *before* a request is sent.
 /// An existing or malformed record must never be replaced by a later attempt.
 pub fn begin(path: &Path, pending: &PendingSave) -> Result<()> {
+    begin_with(path, pending, |file, bytes| {
+        file.write_all(bytes)?;
+        file.sync_all()
+    })
+}
+
+fn begin_with(
+    path: &Path,
+    pending: &PendingSave,
+    persist: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+) -> Result<()> {
     let bytes = serde_json::to_vec(pending)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -69,10 +80,22 @@ pub fn begin(path: &Path, pending: &PendingSave) -> Result<()> {
     let mut file = options
         .open(path)
         .with_context(|| format!("Cannot create pending save record at {}", path.display()))?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    #[cfg(unix)]
-    std::fs::File::open(path.parent().context("Missing pending save directory")?)?.sync_all()?;
+    let result = (|| -> Result<()> {
+        persist(&mut file, &bytes)?;
+        #[cfg(unix)]
+        std::fs::File::open(path.parent().context("Missing pending save directory")?)?
+            .sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        // No request was sent. The exclusive lock prevents another TUI from
+        // replacing this file while we remove a partially persisted record.
+        drop(file);
+        std::fs::remove_file(path).with_context(|| {
+            format!("Cannot remove incomplete pending save record after {error}")
+        })?;
+        return Err(error).context("Could not persist pending save record before request");
+    }
     Ok(())
 }
 
@@ -140,6 +163,25 @@ mod tests {
         let pending = attempt();
         begin(&path, &pending).unwrap();
         assert!(begin(&path, &pending).is_err());
+        assert_eq!(load(&path).unwrap(), Some(pending.clone()));
+        clear(&path, &pending).unwrap();
+    }
+
+    #[test]
+    fn partial_write_before_request_does_not_strand_a_save() {
+        let path = test_path();
+        let pending = attempt();
+        let error = begin_with(&path, &pending, |file, _| {
+            file.write_all(b"{incomplete")?;
+            Err(std::io::Error::other("simulated write failure"))
+        })
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("simulated write failure"));
+        assert!(
+            !path.exists(),
+            "no request was sent, so the partial guard must be removed"
+        );
+        begin(&path, &pending).unwrap();
         assert_eq!(load(&path).unwrap(), Some(pending.clone()));
         clear(&path, &pending).unwrap();
     }

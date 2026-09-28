@@ -36,9 +36,11 @@ All commands are available via the binary directly (`toki-tui <command>`) or thr
 
 ## Recovering an uncertain save
 
-If a save times out, loses its response, or you quit while it is in progress, the TUI retains a local recovery record and **does not retry automatically**. The server might already have created the entry. Timer-changing actions are blocked until the outcome has been reviewed; press `h` to inspect recent history or `q` to exit.
+A timer must run for at least 60 seconds before the TUI offers to save it. Trying earlier leaves it running and sends **no** request or recovery record; wait for the remaining seconds. This is a conservative client-side rule, not a guarantee about the provider's exact minimum.
 
-Close all TUI instances, then run `toki-tui resolve-save` while logged into the **same account**. It reads the server's active timer and recent entries; compare them with the attempted timer and check the web app if the listing is inconclusive. Recent entries may lack a start time and cannot always be uniquely matched. If you cannot tell whether the entry was saved, **do not clear the guard or retry**. After verifying the outcome, type the exact confirmation phrase shown by the command. This clears **only the local guard**; it does not save, delete or restart anything. The 0.4.0 binary predates this recovery command.
+If a save or save-and-continue restart times out, loses its response, or you quit while it is in progress, the TUI retains a local recovery record and **does not retry automatically**. The entry may have saved even when the replacement timer's outcome is unknown. The server might already have created the entry. Timer-changing actions are blocked until the outcome has been reviewed; press `h` to inspect recent history or `q` to exit.
+
+Close all TUI instances, then run `toki-tui resolve-save` while logged into the **same account**. It reads the server's active timer and recent entries; compare them with the attempted timer and check the web app if the listing is inconclusive. Recent entries may lack a start time and cannot always be uniquely matched. If you cannot tell whether the entry was saved, **do not clear the guard or retry**. After verifying the outcome, type the exact confirmation phrase shown by the command. This clears **only the local guard**; it does not save, delete or restart anything. Relaunch the TUI afterward to restore a server-confirmed active timer, if one exists. The 0.4.0 binary predates this recovery command.
 
 ## Configuration
 

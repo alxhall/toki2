@@ -122,7 +122,7 @@ async fn run_ui(mut app: App, mut client: ApiClient) -> Result<()> {
 
     match pending_save::path().and_then(|path| pending_save::load(&path)) {
         Ok(Some(_)) => {
-            println!("\nA save may have committed. Run `toki-tui resolve-save` to inspect it before another save.")
+            println!("\nA save or restart may have committed. Run `toki-tui resolve-save` to inspect server state before another timer change.")
         }
         Err(e) => eprintln!("Could not inspect the save recovery record: {}", e),
         Ok(None) => {}

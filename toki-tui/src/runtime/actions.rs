@@ -552,6 +552,15 @@ fn prepare_save_at(app: &mut App, path: &Path) -> Option<SaveAttempt> {
         app.set_status("No running timer to save".to_string());
         return None;
     };
+    let duration = app.elapsed_duration();
+    if duration < Duration::from_secs(60) {
+        app.navigate_to(app::View::Timer);
+        app.set_status(format!(
+            "Save requires at least one minute. Wait {} more seconds; timer is still running.",
+            60 - duration.as_secs()
+        ));
+        return None;
+    }
     let mode = match app.selected_save_action {
         app::SaveAction::SaveAndStop => SaveMode::Stop,
         app::SaveAction::ContinueSameProject => SaveMode::ContinueSame,
@@ -573,7 +582,6 @@ fn prepare_save_at(app: &mut App, path: &Path) -> Option<SaveAttempt> {
         return None;
     }
 
-    let duration = app.elapsed_duration();
     let full_note = app.full_note_value();
     let note = (!full_note.is_empty()).then_some(full_note);
     let start_args = if mode == SaveMode::ContinueSame {
@@ -651,6 +659,16 @@ pub(super) fn finish_save(app: &mut App, attempt: SaveAttempt, outcome: SaveOutc
     };
 
     app.stop_timer(app.auto_resize_timer);
+    if let Some(Err(error)) = &restart {
+        // The entry was saved, but the separate restart may have committed even
+        // if its response was lost. Keep the guard until the server timer and
+        // history have been checked manually; never start another timer here.
+        app.set_status(format!(
+            "Entry saved; restart outcome unknown ({}). Quit and run resolve-save; do not retry.",
+            error
+        ));
+        return true;
+    }
     if let Err(e) = pending_save::clear(&attempt.path, &attempt.pending) {
         app.set_status(format!("Saved, but could not clear recovery record: {}", e));
         return true;
@@ -1101,6 +1119,12 @@ mod tests {
     use crate::types::ActiveTimerState;
     use time::macros::datetime;
 
+    fn start_eligible_timer(app: &mut App) {
+        app.start_timer(false);
+        app.absolute_start = Some(time::OffsetDateTime::now_utc() - time::Duration::seconds(90));
+        app.local_start = Some(Instant::now() - Duration::from_secs(90));
+    }
+
     #[test]
     fn restore_active_timer_populates_local_app_state() {
         let mut app = test_app();
@@ -1149,9 +1173,51 @@ mod tests {
     }
 
     #[test]
-    fn save_refuses_before_network_if_the_recovery_record_cannot_be_created() {
+    fn under_minute_timer_does_not_create_a_guard_or_send_a_save() {
         let mut app = test_app();
         app.start_timer(false);
+        app.description_input = app::TextInput::from_str("Keep this note");
+        app.selected_save_action = SaveAction::SaveAndStop;
+        let original_start = app.absolute_start;
+        let path = std::env::temp_dir().join(format!("toki-too-short-{}", std::process::id()));
+
+        let attempt = prepare_save_at(&mut app, &path);
+        if let Some(attempt) = &attempt {
+            crate::pending_save::clear(&path, &attempt.pending).unwrap();
+        }
+        assert!(attempt.is_none());
+        assert!(!path.exists());
+        assert_eq!(app.timer_state, app::TimerState::Running);
+        assert_eq!(app.absolute_start, original_start);
+        assert_eq!(app.description_input.value, "Keep this note");
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("at least one minute"));
+    }
+
+    #[test]
+    fn minute_old_timer_can_create_a_pending_record() {
+        let mut app = test_app();
+        app.start_timer(false);
+        app.absolute_start = Some(time::OffsetDateTime::now_utc() - time::Duration::seconds(60));
+        app.local_start = Some(Instant::now() - Duration::from_secs(60));
+        app.selected_save_action = SaveAction::SaveAndStop;
+        let path = std::env::temp_dir().join(format!("toki-one-minute-{}", std::process::id()));
+
+        let attempt = prepare_save_at(&mut app, &path).unwrap();
+        assert_eq!(
+            crate::pending_save::load(&path).unwrap(),
+            Some(attempt.pending.clone())
+        );
+        crate::pending_save::clear(&path, &attempt.pending).unwrap();
+    }
+
+    #[test]
+    fn save_refuses_before_network_if_the_recovery_record_cannot_be_created() {
+        let mut app = test_app();
+        start_eligible_timer(&mut app);
         app.selected_save_action = SaveAction::SaveAndStop;
         let original_start = app.absolute_start;
         // A directory is not a writable recovery file, on Unix or Windows.
@@ -1169,7 +1235,7 @@ mod tests {
     async fn pending_save_blocks_a_second_write_without_clearing_the_timer() {
         let mut app = test_app();
         let mut client = ApiClient::dev().unwrap();
-        app.start_timer(false);
+        start_eligible_timer(&mut app);
         app.description_input = app::TextInput::from_str("Keep this note");
         app.selected_save_action = SaveAction::SaveAndStop;
         let original_start = app.absolute_start.unwrap();
@@ -1207,7 +1273,7 @@ mod tests {
         )
         .unwrap();
         let mut app = test_app();
-        app.start_timer(false);
+        start_eligible_timer(&mut app);
         app.selected_save_action = SaveAction::SaveAndStop;
         let path =
             std::env::temp_dir().join(format!("toki-pending-before-write-{}", std::process::id()));
@@ -1267,7 +1333,7 @@ mod tests {
                 .unwrap();
         });
         let mut app = test_app();
-        app.start_timer(false);
+        start_eligible_timer(&mut app);
         app.description_input = app::TextInput::from_str("Keep this note");
         app.selected_save_action = SaveAction::ContinueNewProject;
         let original_start = app.absolute_start;
@@ -1302,6 +1368,28 @@ mod tests {
         crate::pending_save::clear(&path, &pending).unwrap();
     }
 
+    #[test]
+    fn confirmed_save_and_restart_resumes_only_after_both_responses() {
+        let mut app = test_app();
+        start_eligible_timer(&mut app);
+        app.selected_save_action = SaveAction::ContinueSameProject;
+        app.description_input = app::TextInput::from_str("Finished work");
+        let path = std::env::temp_dir().join(format!("toki-restart-ok-{}", std::process::id()));
+        let attempt = prepare_save_at(&mut app, &path).unwrap();
+
+        assert!(finish_save(
+            &mut app,
+            attempt,
+            SaveOutcome::Confirmed {
+                restart: Some(Ok(()))
+            }
+        ));
+        assert_eq!(app.timer_state, app::TimerState::Running);
+        assert_eq!(crate::pending_save::load(&path).unwrap(), None);
+        assert_eq!(app.description_input.value, "");
+        assert!(app.status_message.as_deref().unwrap().starts_with("Saved "));
+    }
+
     #[tokio::test]
     async fn confirmed_save_with_failed_restart_does_not_fabricate_a_running_timer() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1325,7 +1413,7 @@ mod tests {
             }
         });
         let mut app = test_app();
-        app.start_timer(false);
+        start_eligible_timer(&mut app);
         app.selected_save_action = SaveAction::ContinueSameProject;
         let path = std::env::temp_dir().join(format!("toki-restart-error-{}", std::process::id()));
         let attempt = prepare_save_at(&mut app, &path).unwrap();
@@ -1339,12 +1427,64 @@ mod tests {
         assert!(finish_save(&mut app, attempt, outcome));
         server.await.unwrap();
         assert_eq!(app.timer_state, app::TimerState::Stopped);
-        assert_eq!(crate::pending_save::load(&path).unwrap(), None);
+        let pending = crate::pending_save::load(&path).unwrap().unwrap();
         assert!(app
             .status_message
             .as_deref()
             .unwrap()
-            .contains("could not confirm restart"));
+            .contains("restart outcome unknown"));
+        assert!(prepare_save_at(&mut app, &path).is_none());
+        crate::pending_save::clear(&path, &pending).unwrap();
+    }
+
+    #[tokio::test]
+    async fn committed_restart_with_lost_response_keeps_guard() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = ApiClient::new(
+            &format!("http://{}", listener.local_addr().unwrap()),
+            "test",
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut save, _) = listener.accept().await.unwrap();
+            let mut request = [0; 2048];
+            let read = save.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..read]).contains("PUT /time-tracking/timer"));
+            save.write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}")
+                .await
+                .unwrap();
+            drop(save);
+            let (mut restart, _) = listener.accept().await.unwrap();
+            let read = restart.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..read]).contains("POST /time-tracking/timer"));
+            // The new server timer was created, but its response was lost.
+        });
+        let mut app = test_app();
+        start_eligible_timer(&mut app);
+        app.selected_save_action = SaveAction::ContinueSameProject;
+        let path = std::env::temp_dir().join(format!("toki-restart-lost-{}", std::process::id()));
+        let attempt = prepare_save_at(&mut app, &path).unwrap();
+        let outcome = perform_save(&mut client, &attempt).await;
+        assert!(matches!(
+            outcome,
+            SaveOutcome::Confirmed {
+                restart: Some(Err(_))
+            }
+        ));
+        assert!(finish_save(&mut app, attempt, outcome));
+        server.await.unwrap();
+        assert_eq!(app.timer_state, app::TimerState::Stopped);
+        let pending = crate::pending_save::load(&path).unwrap().unwrap();
+        assert_eq!(pending.mode, crate::pending_save::SaveMode::ContinueSame);
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("restart outcome unknown"));
+        assert!(prepare_save_at(&mut app, &path).is_none());
+        crate::pending_save::clear(&path, &pending).unwrap();
     }
 
     #[tokio::test]
@@ -1365,7 +1505,7 @@ mod tests {
             // The provider may have committed; the response never reaches the client.
         });
         let mut app = test_app();
-        app.start_timer(false);
+        start_eligible_timer(&mut app);
         app.selected_save_action = SaveAction::SaveAndStop;
         app.description_input = app::TextInput::from_str("Keep this note");
         let original_start = app.absolute_start;

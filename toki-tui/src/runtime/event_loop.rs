@@ -104,7 +104,13 @@ pub async fn run_app(
             redraw = true;
             match save_task.take().unwrap().await {
                 Ok((attempt, outcome)) => {
-                    let uncertain = matches!(&outcome, SaveOutcome::Uncertain(_));
+                    let uncertain = matches!(
+                        &outcome,
+                        SaveOutcome::Uncertain(_)
+                            | SaveOutcome::Confirmed {
+                                restart: Some(Err(_))
+                            }
+                    );
                     let confirmed = finish_save(app, attempt, outcome);
                     if confirmed || history_requested_during_save {
                         if let Some(task) = history_task.take() {

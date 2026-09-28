@@ -41,14 +41,15 @@ class Stub(http.server.BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         if self.path == "/me":
             self.respond({"id": 1, "email": "test@example.invalid", "fullName": "Test User"})
         elif self.path == "/time-tracking/timer":
+            started = (datetime.datetime.now(datetime.timezone.utc) -
+                       datetime.timedelta(minutes=2)).isoformat()
             self.respond({"timer": {
-                "startTime": now, "projectId": "p1", "projectName": "Test project",
+                "startTime": started, "projectId": "p1", "projectName": "Test project",
                 "activityId": "a1", "activityName": "Test activity", "note": "",
-                "hours": 0, "minutes": 0, "seconds": 0,
+                "hours": 0, "minutes": 2, "seconds": 0,
             }})
         elif self.path.startswith("/time-tracking/time-entries"):
             if self.server.save_seen.is_set():
