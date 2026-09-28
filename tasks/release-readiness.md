@@ -1,6 +1,6 @@
 # TUI reliability release — candidate notes and gates
 
-**Draft, not a release authorization.** The release belongs to the user's fork. No new tag, release or production mutation is authorized by this document. See [`baseline.md`](baseline.md) for sanitized evidence and [`plan.md`](plan.md) for original scope.
+**Draft for v0.4.1, not a release authorization.** The release belongs to the user's fork. No tag, published release or production mutation is authorized by this document. See [`baseline.md`](baseline.md) for sanitized evidence and [`plan.md`](plan.md) for original scope.
 
 ## User-facing changes since v0.4.0
 
@@ -25,8 +25,9 @@
 
 ## Remaining before publication
 
-- [ ] Get a green fork Actions run on a branch containing the new offline CI gate and final source; review test and Windows build jobs. The existing downloaded diagnostic executable predates this CI-only workflow change but has the same Rust runtime code.
-- [ ] Choose version/release notes, obtain explicit tag/publication approval, and check the tagged release workflow. Do not release merely because a branch build succeeds.
+- [x] Fork Actions run `36405726716` passed the offline CI gate and all Windows/Linux/macOS builds on the pre-version-bump diagnostic branch. The existing downloaded diagnostic executable predates this CI-only workflow change but has the same Rust runtime code.
+- [ ] Confirm the v0.4.1 release-candidate branch build is green after bumping `toki-tui/Cargo.toml` and `Cargo.lock`. Draft public notes are in `toki-tui/RELEASE_NOTES_v0.4.1.md`.
+- [ ] Obtain explicit tag/publication approval and check the tagged release workflow. Do not release merely because a branch build succeeds.
 - [ ] Agree on the small-team rollout and a stop threshold for unexpected native-Windows memory growth. Keep the tested v0.4.0 artifact available and tell testers about the unverified crash.
 
 ## Rollback and uncertain-save safety
