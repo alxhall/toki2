@@ -14,6 +14,7 @@ mod delete_dialog;
 mod description_editor;
 mod history_panel;
 mod history_view;
+pub(crate) mod recovery_overlay;
 mod save_dialog;
 mod selection_views;
 mod statistics_view;
@@ -22,6 +23,17 @@ mod timer_view;
 pub(super) mod utils;
 pub(super) mod widgets;
 mod zen_view;
+
+pub fn render_with_recovery(
+    frame: &mut Frame,
+    app: &mut App,
+    recovery: Option<&recovery_overlay::RecoveryOverlay>,
+) {
+    render(frame, app);
+    if let Some(recovery) = recovery {
+        recovery_overlay::render(frame, recovery);
+    }
+}
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     // Zen mode: full-screen, no stats bar, no other UI

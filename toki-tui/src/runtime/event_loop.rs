@@ -14,6 +14,7 @@ use super::actions::{
     apply_recent_history, fetch_recent_history, finish_save, perform_save, prepare_save,
     run_action, SaveAttempt, SaveOutcome,
 };
+use super::recovery_flow::RecoveryFlow;
 use super::views::handle_view_key;
 
 pub async fn run_app(
@@ -34,6 +35,7 @@ pub async fn run_app(
     let mut unresolved = has_unresolved_save();
     let mut history_task: Option<tokio::task::JoinHandle<Result<Vec<TimeEntry>, String>>> = None;
     let mut history_requested_during_save = false;
+    let mut recovery = RecoveryFlow::default();
     let mut redraw = true;
     let mut last_elapsed_second = None;
 
@@ -54,7 +56,7 @@ pub async fn run_app(
                 terminal.clear()?;
                 app.needs_full_redraw = false;
             }
-            terminal.draw(|f| ui::render(f, app))?;
+            terminal.draw(|f| ui::render_with_recovery(f, app, recovery.overlay.as_ref()))?;
             redraw = false;
             last_elapsed_second = elapsed_second;
         }
@@ -73,16 +75,26 @@ pub async fn run_app(
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
-                    if save_task.is_some() || unresolved || has_unresolved_save() {
+                    if recovery.overlay.is_some() {
                         if matches!(key.code, KeyCode::Char('q' | 'Q')) {
                             app.quit();
+                        } else {
+                            recovery.handle_key(key.code);
+                        }
+                    } else if save_task.is_some() || unresolved || has_unresolved_save() {
+                        if matches!(key.code, KeyCode::Char('q' | 'Q')) {
+                            app.quit();
+                        } else if matches!(key.code, KeyCode::Char('r' | 'R'))
+                            && save_task.is_none()
+                        {
+                            recovery.start(app.user_id, client);
                         } else if matches!(key.code, KeyCode::Char('h' | 'H')) {
                             let _ = action_tx.send(Action::LoadHistoryAndOpen);
                         } else if key.code == KeyCode::Esc && app.current_view == View::History {
                             app.navigate_to(View::Timer);
                         } else {
                             app.set_status(
-                                "Save pending or unresolved. Use h for history or q to quit."
+                                "Save pending or unresolved. Press r to review, h for history, or q to quit."
                                     .to_string(),
                             );
                         }
@@ -125,7 +137,7 @@ pub async fn run_app(
                 Err(e) => {
                     unresolved = true;
                     app.set_status(format!(
-                        "Save outcome unknown (worker failed: {}). Do not retry.",
+                        "Save outcome unknown (worker failed: {}). Press r to review; do not retry.",
                         e
                     ));
                     if history_requested_during_save {
@@ -134,6 +146,9 @@ pub async fn run_app(
                     }
                 }
             }
+        }
+        if recovery.poll().await {
+            redraw = true;
         }
         if history_task.as_ref().is_some_and(|task| task.is_finished()) {
             redraw = true;

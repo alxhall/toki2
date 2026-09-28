@@ -52,6 +52,8 @@ class Stub(http.server.BaseHTTPRequestHandler):
                 "hours": 0, "minutes": 2, "seconds": 0,
             }})
         elif self.path.startswith("/time-tracking/time-entries"):
+            with self.server.request_lock:
+                self.server.history_reads += 1
             if self.server.save_seen.is_set():
                 self.server.refresh_seen.set()
                 if self.server.mode == "slow-refresh":
@@ -77,7 +79,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
         self.server.save_seen.set()
         if self.server.mode != "slow-refresh":
             self.server.release_save.wait(timeout=15)
-        if self.server.mode in ("lost-response", "deferred-history"):
+        if self.server.mode in ("lost-response", "deferred-history", "guided-recovery"):
             self.connection.shutdown(socket.SHUT_RDWR)
             self.connection.close()
         elif self.server.mode == "server-error":
@@ -96,6 +98,7 @@ def main(binary, mode="slow-save", require_responsive=False):
         server.mode = mode
         server.save_seen = threading.Event()
         server.save_requests = 0
+        server.history_reads = 0
         server.request_lock = threading.Lock()
         server.refresh_seen = threading.Event()
         server.release_save = threading.Event()
@@ -207,11 +210,43 @@ def main(binary, mode="slow-save", require_responsive=False):
                     time.sleep(0.2)
                     os.write(master2, b"1")
                     time.sleep(0.2)
-                    os.write(master2, b"q")
-                    process2.wait(timeout=5)
                     assert server.save_requests == 1, "Restart replayed an unresolved save"
                     assert os.path.exists(marker), "Restart lost the recovery record"
-                    print("Restart retained the unresolved record; no duplicate PUT")
+                    if mode == "guided-recovery":
+                        with server.request_lock:
+                            previous_reads = server.history_reads
+                        os.write(master2, b"r")  # read-only in-app review
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            with server.request_lock:
+                                if server.history_reads > previous_reads:
+                                    break
+                            time.sleep(0.05)
+                        else:
+                            raise AssertionError("In-app recovery did not read server history")
+                        time.sleep(0.4)
+                        os.write(master2, b"y")  # no prior review confirmation
+                        time.sleep(0.2)
+                        assert os.path.exists(marker), "Single key cleared the guard"
+                        os.write(master2, b"c")
+                        time.sleep(0.2)
+                        os.write(master2, b"n")  # cancel confirmation
+                        time.sleep(0.2)
+                        os.write(master2, b"y")
+                        time.sleep(0.2)
+                        assert os.path.exists(marker), "Cancelled confirmation cleared the guard"
+                        os.write(master2, b"c")
+                        time.sleep(0.2)
+                        os.write(master2, b"y")
+                        time.sleep(0.3)
+                        assert not os.path.exists(marker), "In-app confirmation did not clear the guard"
+                        assert server.save_requests == 1, "In-app review replayed the save"
+                        print("In-app review cleared only the local guard after confirmation")
+                    os.write(master2, b"q")
+                    process2.wait(timeout=5)
+                    if mode != "guided-recovery":
+                        assert os.path.exists(marker), "Restart lost the recovery record"
+                        print("Restart retained the unresolved record; no duplicate PUT")
                 finally:
                     if process2.poll() is None:
                         process2.terminate()
@@ -251,7 +286,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary")
-    parser.add_argument("--mode", choices=("slow-save", "lost-response", "server-error", "slow-refresh", "deferred-history"), default="slow-save")
+    parser.add_argument("--mode", choices=("slow-save", "lost-response", "server-error", "slow-refresh", "deferred-history", "guided-recovery"), default="slow-save")
     parser.add_argument("--require-responsive", action="store_true")
     args = parser.parse_args()
     main(os.path.abspath(args.binary), mode=args.mode, require_responsive=args.require_responsive)

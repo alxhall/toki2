@@ -101,7 +101,7 @@ async fn run_ui(mut app: App, mut client: ApiClient) -> Result<()> {
     bootstrap::initialize_app_state(&mut app, &mut client).await;
     match pending_save::path().and_then(|path| pending_save::load(&path)) {
         Ok(Some(_)) => app.set_status(
-            "Save outcome unknown. Press h for history; quit and run toki-tui resolve-save."
+            "Save outcome unknown. Press r to review in the TUI, or quit and run resolve-save."
                 .to_string(),
         ),
         Err(e) => app.set_status(format!(

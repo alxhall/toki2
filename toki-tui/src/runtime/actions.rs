@@ -651,7 +651,7 @@ pub(super) fn finish_save(app: &mut App, attempt: SaveAttempt, outcome: SaveOutc
     let SaveOutcome::Confirmed { restart } = outcome else {
         if let SaveOutcome::Uncertain(error) = outcome {
             app.set_status(format!(
-                "Save outcome unknown ({}). Do not retry until verified.",
+                "Save outcome unknown ({}). Press r to review; do not retry.",
                 error
             ));
         }
@@ -664,7 +664,7 @@ pub(super) fn finish_save(app: &mut App, attempt: SaveAttempt, outcome: SaveOutc
         // if its response was lost. Keep the guard until the server timer and
         // history have been checked manually; never start another timer here.
         app.set_status(format!(
-            "Entry saved; restart outcome unknown ({}). Quit and run resolve-save; do not retry.",
+            "Entry saved; restart outcome unknown ({}). Press r to review; do not retry.",
             error
         ));
         return true;

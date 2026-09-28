@@ -22,6 +22,25 @@ pub async fn run() -> Result<()> {
     let cfg = TokiConfig::load()?;
     let session = session_store::load_session()?.context("Log in to the same account first")?;
     let mut client = ApiClient::new(&cfg.api_url, &session)?;
+    let snapshot = inspect(&mut client, &pending).await?;
+    let mut output = io::stdout().lock();
+    for line in &snapshot.lines {
+        writeln!(output, "{line}")?;
+    }
+    confirm_clear(&path, &pending, &mut io::stdin().lock(), &mut output)
+}
+
+/// Read-only evidence for CLI and in-app recovery. Absence of a matching entry
+/// is never proof that the provider did not commit.
+pub(crate) struct RecoverySnapshot {
+    pub pending: PendingSave,
+    pub lines: Vec<String>,
+}
+
+pub(crate) async fn inspect(
+    client: &mut ApiClient,
+    pending: &PendingSave,
+) -> Result<RecoverySnapshot> {
     let me = tokio::time::timeout(Duration::from_secs(15), client.me())
         .await
         .context("Timed out checking the current account")??;
@@ -47,31 +66,24 @@ pub async fn run() -> Result<()> {
             .context("Timed out checking recent server entries")??;
     entries.sort_by(|a, b| b.date.cmp(&a.date));
 
-    let mut output = io::stdout().lock();
-    writeln!(
-        output,
+    let mut lines = vec![format!(
         "Unresolved save for account {}: timer started {}, attempted {} ({:?}).",
         pending.user_id, pending.timer_started_at, pending.attempted_at, pending.mode
-    )?;
-    match timer {
-        Some(timer) => writeln!(
-            output,
+    )];
+    lines.push(match timer {
+        Some(timer) => format!(
             "Current server timer: started {}, project {}.",
             timer.start_time,
             safe_label(timer.project_name.as_deref().unwrap_or("(none)"))
-        )?,
-        None => writeln!(output, "Current server timer: none.")?,
-    }
+        ),
+        None => "Current server timer: none.".to_string(),
+    });
     if from > earliest {
-        writeln!(output, "The original timer predates this 30-day history window; check older entries in the web app.")?;
+        lines.push("The original timer predates this 30-day history window; check older entries in the web app.".to_string());
     }
-    writeln!(
-        output,
-        "Recent server entries (up to 20; not proof of a match):"
-    )?;
+    lines.push("Recent server entries (up to 20; not proof of a match):".to_string());
     for entry in entries.iter().take(20) {
-        writeln!(
-            output,
+        lines.push(format!(
             "  {}  {}h  {} / {}  registration {}  start {}",
             safe_label(&entry.date),
             entry.hours,
@@ -82,17 +94,19 @@ pub async fn run() -> Result<()> {
                 .start_time
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "unavailable".to_string())
-        )?;
+        ));
     }
     if entries.len() > 20 {
-        writeln!(
-            output,
+        lines.push(format!(
             "  ... {} more entries. Inspect the web app for the full list.",
             entries.len() - 20
-        )?;
+        ));
     }
-    writeln!(output, "These reads may be inconclusive. Verify the save in the server/web app, then close EVERY other TUI instance before clearing. If unsure, leave the guard in place. No save will be retried automatically.")?;
-    confirm_clear(&path, &pending, &mut io::stdin().lock(), &mut output)
+    lines.push("These reads may be inconclusive. Verify the save in the server/web app before clearing. If unsure, leave the guard in place. No save will be retried automatically.".to_string());
+    Ok(RecoverySnapshot {
+        pending: pending.clone(),
+        lines,
+    })
 }
 
 fn safe_label(value: &str) -> String {
