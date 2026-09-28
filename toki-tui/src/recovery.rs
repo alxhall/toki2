@@ -102,7 +102,7 @@ pub(crate) async fn inspect(
             entries.len() - 20
         ));
     }
-    lines.push("These reads may be inconclusive. Verify the save in the server/web app before clearing. If unsure, leave the guard in place. No save will be retried automatically.".to_string());
+    lines.push("These reads may be inconclusive. Verify the save in the server/web app and close other TUI instances before clearing. If unsure, leave the guard in place. No save will be retried automatically.".to_string());
     Ok(RecoverySnapshot {
         pending: pending.clone(),
         lines,
