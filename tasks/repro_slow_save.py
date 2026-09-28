@@ -4,9 +4,9 @@
 Linux/macOS PTY harness for the released TUI behavior. Run from repo root:
     python3 tasks/repro_slow_save.py target/release/toki-tui
 
-A controlled HTTP server can hold the save or the subsequent history refresh,
-return 500, or drop the save response after receiving the request. No production
-requests or real credentials are used. Windows must be tested separately.
+A controlled HTTP server can hold save/history responses, return 500, drop a
+committed save response, or serve a four-second timer that must not be saved.
+No production requests or real credentials are used. Windows must be tested separately.
 """
 
 import datetime
@@ -44,12 +44,13 @@ class Stub(http.server.BaseHTTPRequestHandler):
         if self.path == "/me":
             self.respond({"id": 1, "email": "test@example.invalid", "fullName": "Test User"})
         elif self.path == "/time-tracking/timer":
+            elapsed = 4 if self.server.mode == "short-timer" else 120
             started = (datetime.datetime.now(datetime.timezone.utc) -
-                       datetime.timedelta(minutes=2)).isoformat()
+                       datetime.timedelta(seconds=elapsed)).isoformat()
             self.respond({"timer": {
                 "startTime": started, "projectId": "p1", "projectName": "Test project",
                 "activityId": "a1", "activityName": "Test activity", "note": "",
-                "hours": 0, "minutes": 2, "seconds": 0,
+                "hours": 0, "minutes": elapsed // 60, "seconds": elapsed % 60,
             }})
         elif self.path.startswith("/time-tracking/time-entries"):
             with self.server.request_lock:
@@ -158,6 +159,15 @@ def main(binary, mode="slow-save", require_responsive=False):
             os.write(master, b"\x13")  # Ctrl+S -> save dialog
             time.sleep(0.3)
             os.write(master, b"1")  # save and stop
+            if mode == "short-timer":
+                time.sleep(0.4)
+                assert not server.save_seen.is_set(), "Short timer caused a PUT"
+                assert not os.path.exists(os.path.join(tmp, "toki-tui", "pending-save.json")), \
+                    "Short timer created a recovery guard"
+                os.write(master, b"q")
+                assert process.wait(timeout=5) == 0
+                print("Short timer remained unsaved; no PUT or recovery guard")
+                return
             if not server.save_seen.wait(5):
                 raise RuntimeError("No PUT /time-tracking/timer after Ctrl+S, 1")
             if mode == "slow-refresh" and not server.refresh_seen.wait(5):
@@ -286,7 +296,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary")
-    parser.add_argument("--mode", choices=("slow-save", "lost-response", "server-error", "slow-refresh", "deferred-history", "guided-recovery"), default="slow-save")
+    parser.add_argument("--mode", choices=("slow-save", "lost-response", "server-error", "slow-refresh", "deferred-history", "guided-recovery", "short-timer"), default="slow-save")
     parser.add_argument("--require-responsive", action="store_true")
     args = parser.parse_args()
     main(os.path.abspath(args.binary), mode=args.mode, require_responsive=args.require_responsive)
