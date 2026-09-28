@@ -1,6 +1,6 @@
-# Toki TUI v0.4.1 — draft release notes
+# Toki TUI v0.4.1
 
-Reliability update to v0.4.0. This draft is **not** a published release.
+Reliability update to v0.4.0.
 
 ## Improvements
 
@@ -12,7 +12,7 @@ Reliability update to v0.4.0. This draft is **not** a published release.
 
 ## Verification and limitations
 
-The TUI tests, seven offline save/recovery scenarios and the redraw regression passed on the pre-version-bump diagnostic branch; Windows, Linux and macOS builds also passed there. The v0.4.1 release-candidate branch and eventual tag must pass their own CI runs before publication. One normal save-and-stop and one normal same-project save-and-continue were checked against the web app by a Windows tester, each yielding one intended entry; the latter restarted the timer on the same project/activity. No deliberate response loss was tested on production.
+Release CI runs TUI tests, seven offline save/recovery scenarios, a redraw regression and builds for Windows, Linux and macOS. One normal save-and-stop and one normal same-project save-and-continue were checked against the web app by a Windows tester, each yielding one intended entry; the latter restarted the timer on the same project/activity. No deliberate response loss was tested on production.
 
 The separately reported **hours-long timer crash remains unverified** and must not be described as fixed. Recent server history may be incomplete or ambiguous after a lost response; if you cannot establish whether an entry was saved, leave the guard in place and do not retry. Token authentication, Aven support, feature removal and the low-priority empty-row issue are deferred.
 
