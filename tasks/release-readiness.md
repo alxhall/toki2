@@ -1,0 +1,34 @@
+# TUI reliability release — candidate notes and gates
+
+**Draft, not a release authorization.** The release belongs to the user's fork. No new tag, release or production mutation is authorized by this document. See [`baseline.md`](baseline.md) for sanitized evidence and [`plan.md`](plan.md) for original scope.
+
+## User-facing changes since v0.4.0
+
+- Save sends the current API's `userNote` payload; project/activity still come from the server-side active timer. Select and verify those fields **before starting** a timer.
+- Save and history I/O no longer block keyboard/redraw. One pending save is recorded before the request and survives a lost response or quitting; no automatic replay. An uncertain outcome blocks timer changes until reviewed.
+- Saves attempted in the first 60 seconds are refused *before* a write or guard is created; the timer and note stay intact. This conservative client rule is not an assertion about Kleer's exact minimum.
+- Press `r` in a blocked TUI for read-only same-account timer/history review, then `c` and `y` only after independently confirming the result. Clearing removes only the local guard, not a server entry or timer. Quit and relaunch after clearing. `resolve-save` remains a fallback.
+- Idle screens no longer redraw unchanged content at 10 Hz. A running timer refreshes about once a second.
+
+## Evidence available
+
+- 72 Rust TUI tests and seven loopback PTY modes (slow save/refresh, server error, lost response, deferred history, guided recovery, short timer), plus idle/redraw/resize checks, pass locally. The release workflow now also runs the offline PTY checks on its Linux test job; a run of the **updated workflow** is still required before publishing.
+- The Windows diagnostic artifact at commit `fa61f5c` passed the existing cross-platform Actions run `36400238907`. A tester verified one real save-and-stop and, separately, one same-project save-and-continue (**dialog option 3**), each against the web app. Both created exactly one intended entry; the second started a timer on the same project/activity. The entries were genuine work and kept.
+- The original v0.4.0 caused Windows Terminal private memory to rise from about 95 to 1034 MiB in a five-minute visible idle test, while the TUI stayed near 5–6 MiB. With the redraw-only diagnostic build, Terminal stayed approximately flat over 110 seconds idle and another 110 seconds with an advancing offline timer. This is evidence for the *rapid redraw-related growth*, not an hours-long stress result.
+- The WSL interactive lost-response fixture was exercised both under a PTY test and hands-on by the tester. It uses a throwaway account/config and no production traffic.
+
+## Known limits / release decision
+
+- The reported long-running timer crash was not reproduced or investigated to root cause. The user explicitly chose to treat it as a **known unverified risk** rather than run an hours-long memory test now. Do not claim it is fixed.
+- Native-Windows uncertain-save overlay and lost restart response have not been fault-injected. Do **not** induce a lost response on production. Recent history and an absent active timer alone cannot prove that a write did not commit; server idempotency/strong lookup would be a separate change.
+- The next release skips token login, optional Aven, feature removal and the low-priority empty-row task. Known ordinary Clippy warnings are recorded in `baseline.md`; do not weaken checks to suppress them.
+
+## Remaining before publication
+
+- [ ] Get a green fork Actions run on a branch containing the new offline CI gate and final source; review test and Windows build jobs. The existing downloaded diagnostic executable predates this CI-only workflow change but has the same Rust runtime code.
+- [ ] Choose version/release notes, obtain explicit tag/publication approval, and check the tagged release workflow. Do not release merely because a branch build succeeds.
+- [ ] Agree on the small-team rollout and a stop threshold for unexpected native-Windows memory growth. Keep the tested v0.4.0 artifact available and tell testers about the unverified crash.
+
+## Rollback and uncertain-save safety
+
+If the new binary fails, stop using it and check the web app's current timer and recent entries before any new save. If a pending recovery guard exists, **do not switch to v0.4.0 to retry the save**: that older binary does not honor the new guard and could duplicate a committed entry. Use the new binary's read-only `r` review or, after closing all TUI copies, `resolve-save`; leave the guard intact when server evidence is inconclusive. Never delete unrelated server history. Once no save is unresolved, the old artifact can be used as a rollback while investigating the issue. Stop memory testing early rather than allowing multi-GB growth or disrupting other tabs.

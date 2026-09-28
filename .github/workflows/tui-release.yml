@@ -30,6 +30,16 @@ jobs:
       - name: Run toki-tui tests
         run: cargo test -p toki-tui
 
+      - name: Build TUI for offline PTY checks
+        run: cargo build -p toki-tui
+
+      - name: Check offline save, recovery, and redraw behavior
+        run: |
+          for mode in slow-save slow-refresh lost-response server-error deferred-history guided-recovery short-timer; do
+            python3 tasks/repro_slow_save.py target/debug/toki-tui --mode "$mode" --require-responsive
+          done
+          python3 tasks/repro_idle_redraw.py target/debug/toki-tui
+
   build-linux:
     name: Build (Linux musl ${{ matrix.target }})
     needs: test-tui
