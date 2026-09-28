@@ -56,7 +56,7 @@ Plan and decision gates: [`tasks/plan.md`](plan.md). **Approved; Phase 0 underwa
 **Depends on:** 0.1. **Verification:** reproducible per-process measurements and sanitized timeline showing growth/stall correlation; agree on a numeric ceiling after establishing a stable baseline. **Likely files:** test protocol/evidence docs; optional diagnostic harness. **Size:** M.
 
 ### 2.2 Fix the measured resource or timer defect
-- [ ] Profile the specific reproducing path; isolate allocation/retention or overflow before editing production logic. If memory and crash have different causes, track them separately.
+- [ ] Profile the specific reproducing path; isolate allocation/retention or overflow before editing production logic. If memory and crash have different causes, track them separately. **Idle evidence:** unchanged v0.4.0 rendered at 10 Hz (~1,225 ANSI bytes/5 s); the focused redraw build emitted zero and kept native Windows Terminal private memory ~86 MiB for 110 seconds (versus +245.5 MiB for v0.4.0 at 110 seconds). This does not prove the long-running-timer crash fixed.
 - [ ] Add a focused regression guard and repeat the same Windows protocol under the candidate binary.
 **Depends on:** 2.1. **Verification:** Windows memory stays within the agreed budget/plateaus in the repeatable workload, crash no longer reproduces, and `SQLX_OFFLINE=true cargo test -p toki-tui` passes. **Likely files:** determined by profiling, not preselected. **Size:** conditional; split by cause.
 
