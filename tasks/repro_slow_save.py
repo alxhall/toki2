@@ -44,8 +44,12 @@ class Stub(http.server.BaseHTTPRequestHandler):
         if self.path == "/me":
             self.respond({"id": 1, "email": "test@example.invalid", "fullName": "Test User"})
         elif self.path == "/time-tracking/timer":
+            if self.server.mode == "interactive-demo" and self.server.save_seen.is_set():
+                self.respond({"timer": None})
+                return
             elapsed = 4 if self.server.mode == "short-timer" else 120
-            started = (datetime.datetime.now(datetime.timezone.utc) -
+            started = (self.server.timer_started_at if self.server.mode == "interactive-demo" else
+                       datetime.datetime.now(datetime.timezone.utc) -
                        datetime.timedelta(seconds=elapsed)).isoformat()
             self.respond({"timer": {
                 "startTime": started, "projectId": "p1", "projectName": "Test project",
@@ -59,6 +63,18 @@ class Stub(http.server.BaseHTTPRequestHandler):
                 self.server.refresh_seen.set()
                 if self.server.mode == "slow-refresh":
                     self.server.release_save.wait(timeout=15)
+                if self.server.mode == "interactive-demo":
+                    start = self.server.timer_started_at
+                    self.respond([{
+                        "registrationId": "demo-entry-1", "projectId": "p1",
+                        "projectName": "Test project", "activityId": "a1",
+                        "activityName": "Test activity", "date": start.date().isoformat(),
+                        "hours": 0.04, "note": "Offline recovery demo",
+                        "startTime": start.isoformat(),
+                        "endTime": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "status": "open",
+                    }])
+                    return
             self.respond([])
         elif self.path == "/time-tracking/projects":
             self.respond([{"projectId": "p1", "projectName": "Test project"}])
@@ -80,7 +96,7 @@ class Stub(http.server.BaseHTTPRequestHandler):
         self.server.save_seen.set()
         if self.server.mode != "slow-refresh":
             self.server.release_save.wait(timeout=15)
-        if self.server.mode in ("lost-response", "deferred-history", "guided-recovery"):
+        if self.server.mode in ("lost-response", "deferred-history", "guided-recovery", "interactive-demo"):
             self.connection.shutdown(socket.SHUT_RDWR)
             self.connection.close()
         elif self.server.mode == "server-error":

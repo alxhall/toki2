@@ -44,6 +44,15 @@ Press `r` in the blocked TUI for a read-only review of the current server timer 
 
 Alternatively, close all TUI instances and run `toki-tui resolve-save` while logged into the **same account**. It shows the same read-only evidence and requires the exact confirmation phrase before clearing the local guard. The 0.4.0 binary predates this recovery command.
 
+To try the recovery screen without a real save, use the WSL/Linux interactive fixture from the repository root:
+
+```bash
+cargo build -p toki-tui
+python3 tasks/interactive_recovery_demo.py target/debug/toki-tui
+```
+
+It uses a localhost fake server, a fake account and an automatically deleted config directory. Follow its instructions to trigger a fake committed save with a lost response, review it with `r`, and clear its throwaway guard with `c`, then `y`. The fixture does not test the Windows executable or contact production.
+
 ## Configuration
 
 Config file: `~/.config/toki-tui/config.toml`
