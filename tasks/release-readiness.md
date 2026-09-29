@@ -1,6 +1,6 @@
 # TUI reliability release — candidate notes and gates
 
-**Draft for v0.4.1, not a release authorization.** The release belongs to the user's fork. No tag, published release or production mutation is authorized by this document. See [`baseline.md`](baseline.md) for sanitized evidence and [`plan.md`](plan.md) for original scope.
+**Historical v0.4.1 candidate checklist:** v0.4.1 was published and its tag workflow succeeded; unchecked pre-release items below were not retrospectively updated. This is not an authorization for a new release or production mutation. See [`tui-v0.4.2-plan.md`](tui-v0.4.2-plan.md) for the current candidate scope, [`baseline.md`](baseline.md) for sanitized v0.4.1 evidence, and [`plan.md`](plan.md) for the original reliability plan.
 
 ## User-facing changes since v0.4.0
 

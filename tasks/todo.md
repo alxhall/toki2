@@ -1,6 +1,6 @@
 # Toki TUI task breakdown
 
-Plan and decision gates: [`tasks/plan.md`](plan.md). **Approved; Phase 0 underway.** Baseline evidence: [`tasks/baseline.md`](baseline.md). The code work starts from `release/v0.4.0` in an isolated worktree; TUI releases are fork-owned and require no upstream PR. This checklist is a planning artifact, not a second issue tracker: existing bug state remains in Aven. Do not bulk-create or change Aven items until requested. Check off items only with recorded evidence; conditional tasks may be split after their spikes.
+Historical reliability breakdown: [`tasks/plan.md`](plan.md). **The v0.4.1 reliability release was published; this checklist was not retrospectively checked off and is not the current work queue.** Current 0.4.2 scope: [`tui-v0.4.2-plan.md`](tui-v0.4.2-plan.md). Existing bug state remains in Aven; do not bulk-create or change Aven items until requested.
 
 ## Phase 0 — Baseline and evidence
 
