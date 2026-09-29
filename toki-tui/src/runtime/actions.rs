@@ -117,6 +117,10 @@ pub(super) async fn run_action(
         Action::RefreshHistoryBackground => {
             refresh_history_background(app, client).await;
         }
+        Action::LoadAvenTasks { .. } => {
+            // Only the event loop may dispatch a bounded, off-loop Aven lookup.
+            app.set_status("Aven lookup must be scheduled by the UI event loop".to_string());
+        }
         Action::ResumeEntry(entry) => {
             resume_entry(entry, app, client).await;
         }

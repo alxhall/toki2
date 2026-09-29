@@ -70,9 +70,12 @@ api_url = "https://toki-api.spinit.se"
 # Example: branch "branding/redesign" → "Development: branding/redesign"
 git_default_prefix = "Utveckling"
 
-# Taskwarrior filter tokens prepended before `status:pending export`.
-# Leave empty to show all pending tasks.
-# Example: "+work project:Toki"
+# Task picker in the note editor: "none" (default), "aven", or "taskwarrior".
+# Only the selected picker's shortcut is shown and enabled.
+task_manager = "none"
+
+# Optional Taskwarrior filter, used only with task_manager = "taskwarrior".
+# Leave empty to show all pending tasks. Example: "+work project:Toki"
 task_filter = ""
 
 # Whether to automatically resize the timer widget when the timer starts/stops.
@@ -93,6 +96,12 @@ note = "Working on stuff"
 
 Define reusable presets in `config.toml`. In the timer view, press `T` to open the template picker and select one to pre-fill the current entry.
 
+### Optional Aven note picker
+
+Set `task_manager = "aven"` in `config.toml` to show `Ctrl+A` in the note editor. The picker lists open tasks from the active Aven workspace across projects, displaying `[REF] Title` when a reference exists. The TUI runs `aven list --open --json` in the editor's selected working directory. Select with arrows or `j`/`k`; `Enter` appends **only the title** to the note, and `Esc` cancels. Aven is optional: if missing, the picker shows an error without changing the note or affecting time tracking. It only reads local task data; it does not sync or update tasks.
+
+To use the existing Taskwarrior picker instead, set `task_manager = "taskwarrior"`; it appears on `Ctrl+T`. The default `"none"` hides and disables both picker shortcuts. Only one task manager can be selected at a time.
+
 ### Environment variables
 
 Environment variables override values from `config.toml`.
@@ -103,6 +112,7 @@ Environment variables override values from `config.toml`.
 ```bash
 TOKI_TUI_API_URL="http://localhost:8080"
 TOKI_TUI_GIT_DEFAULT_PREFIX="Development"
+TOKI_TUI_TASK_MANAGER="taskwarrior"
 TOKI_TUI_TASK_FILTER="+work project:Toki"
 TOKI_TUI_AUTO_RESIZE_TIMER=true
 ```
@@ -112,6 +122,7 @@ TOKI_TUI_AUTO_RESIZE_TIMER=true
 ```toml
 api_url = "http://localhost:8080"
 git_default_prefix = "Development"
+task_manager = "taskwarrior"
 task_filter = "+work"
 ```
 
@@ -150,7 +161,8 @@ Run `just tui-logs` (or `toki-tui logs-path`) to print the log directory path.
 | `Ctrl+R` | Remove linked log file |
 | `Ctrl+D` | Change working directory |
 | `Ctrl+G` | Git: copy/paste branch or commit |
-| `Ctrl+T` | Taskwarrior: pick a task |
+| `Ctrl+T` | Taskwarrior picker (only when `task_manager = "taskwarrior"`) |
+| `Ctrl+A` | Aven picker (only when `task_manager = "aven"`; ref shown, title inserted) |
 | `Ctrl+X` | Clear note |
 | `Ctrl+←/→` | Word-boundary navigation |
 | `Ctrl+Backspace` | Delete word back |

@@ -154,6 +154,16 @@ pub struct TaskwarriorOverlay {
     pub error: Option<String>,
 }
 
+/// State for the optional read-only Aven note picker.
+#[derive(Debug, Clone, Default)]
+pub struct AvenOverlay {
+    pub tasks: Vec<crate::aven::AvenTask>,
+    pub selected: Option<usize>,
+    pub loading: bool,
+    pub error: Option<String>,
+    pub request_id: u64,
+}
+
 /// A text input with mid-string cursor support.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TextInput {

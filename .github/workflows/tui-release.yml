@@ -39,6 +39,7 @@ jobs:
             python3 tasks/repro_slow_save.py target/debug/toki-tui --mode "$mode" --require-responsive
           done
           python3 tasks/repro_idle_redraw.py target/debug/toki-tui
+          python3 tasks/repro_aven_picker.py target/debug/toki-tui
 
   build-linux:
     name: Build (Linux musl ${{ matrix.target }})

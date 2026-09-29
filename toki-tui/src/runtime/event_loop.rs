@@ -1,5 +1,6 @@
 use crate::api::ApiClient;
 use crate::app::{App, TimerState, View};
+use crate::aven;
 use crate::pending_save;
 use crate::types::TimeEntry;
 use crate::ui;
@@ -16,6 +17,8 @@ use super::actions::{
 };
 use super::recovery_flow::RecoveryFlow;
 use super::views::handle_view_key;
+
+type AvenLookup = Result<Vec<aven::AvenTask>, String>;
 
 pub async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -35,6 +38,7 @@ pub async fn run_app(
     let mut unresolved = has_unresolved_save();
     let mut history_task: Option<tokio::task::JoinHandle<Result<Vec<TimeEntry>, String>>> = None;
     let mut history_requested_during_save = false;
+    let mut aven_task: Option<tokio::task::JoinHandle<(u64, AvenLookup)>> = None;
     let mut recovery = RecoveryFlow::default();
     let mut redraw = true;
     let mut last_elapsed_second = None;
@@ -150,6 +154,20 @@ pub async fn run_app(
         if recovery.poll().await {
             redraw = true;
         }
+        if aven_task.as_ref().is_some_and(|task| task.is_finished()) {
+            redraw = true;
+            match aven_task.take().unwrap().await {
+                Ok((request_id, result)) => app.finish_aven_load(request_id, result),
+                Err(_) => {
+                    if let Some(request_id) = app.aven_overlay.as_ref().map(|o| o.request_id) {
+                        app.finish_aven_load(
+                            request_id,
+                            Err("Aven task lookup failed".to_string()),
+                        );
+                    }
+                }
+            }
+        }
         if history_task.as_ref().is_some_and(|task| task.is_finished()) {
             redraw = true;
             match history_task.take().unwrap().await {
@@ -189,6 +207,14 @@ pub async fn run_app(
                             (attempt, outcome)
                         }));
                     }
+                }
+                Action::LoadAvenTasks { request_id, cwd } => {
+                    if let Some(task) = aven_task.take() {
+                        task.abort();
+                    }
+                    aven_task = Some(tokio::spawn(async move {
+                        (request_id, aven::open_tasks(&cwd).await)
+                    }));
                 }
                 Action::RefreshHistoryBackground => {
                     if save_task.is_none() && history_task.is_none() {

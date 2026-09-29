@@ -1,5 +1,6 @@
 use super::utils::centered_rect;
 use super::*;
+use crate::config::TaskManager;
 use crate::log_notes;
 
 pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
@@ -13,7 +14,7 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
             Constraint::Length(6), // 1: Info panel (4 lines: cwd, branch, commit, log path)
             Constraint::Min(3),    // 2: Log content box (empty space when no log)
             Constraint::Min(0),    // 3: Spacer
-            Constraint::Length(3), // 4: Controls
+            Constraint::Length(4), // 4: Controls (two text rows for both task pickers)
         ])
         .split(body);
 
@@ -202,9 +203,22 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
             Span::raw(": Confirm  "),
             Span::styled("Esc", Style::default().fg(Color::Yellow)),
             Span::raw(": Cancel  "),
+        ];
+        match app.task_manager {
+            TaskManager::None => {}
+            TaskManager::Aven => {
+                spans.push(Span::styled("Ctrl+A", Style::default().fg(Color::Yellow)));
+                spans.push(Span::raw(": Aven  "));
+            }
+            TaskManager::Taskwarrior => {
+                spans.push(Span::styled("Ctrl+T", Style::default().fg(Color::Yellow)));
+                spans.push(Span::raw(": Taskwarrior  "));
+            }
+        }
+        spans.extend([
             Span::styled("Ctrl+L", Style::default().fg(Color::Yellow)),
             Span::raw(": Add/edit log  "),
-        ];
+        ]);
         if has_log {
             spans.push(Span::styled("Ctrl+R", Style::default().fg(Color::Yellow)));
             spans.push(Span::raw(": Remove log  "));
@@ -221,14 +235,13 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
                     Color::DarkGray
                 }),
             ),
-            Span::styled("Ctrl+T", Style::default().fg(Color::Yellow)),
-            Span::raw(": Taskwarrior"),
         ]);
         spans
     };
 
     let controls = Paragraph::new(Line::from(controls_text))
         .alignment(Alignment::Center)
+        .wrap(ratatui::widgets::Wrap { trim: false })
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -240,6 +253,65 @@ pub fn render_description_editor(frame: &mut Frame, app: &App, body: Rect) {
                 .padding(ratatui::widgets::Padding::horizontal(1)),
         );
     frame.render_widget(controls, chunks[4]);
+}
+
+pub fn render_aven_overlay(frame: &mut Frame, app: &App, body: Rect) {
+    render_description_editor(frame, app, body);
+    let Some(overlay) = &app.aven_overlay else {
+        return;
+    };
+    let area = centered_rect((frame.area().width as f32 * 0.70) as u16, 20, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(Span::styled(
+            " Aven Tasks ",
+            Style::default().fg(Color::Yellow),
+        ))
+        .padding(Padding::horizontal(1));
+    if overlay.loading || overlay.error.is_some() || overlay.tasks.is_empty() {
+        let message = if overlay.loading {
+            "Loading Aven tasks… (Esc to cancel)"
+        } else if let Some(error) = &overlay.error {
+            error.as_str()
+        } else {
+            "No open tasks in this workspace (Esc to close)"
+        };
+        frame.render_widget(
+            Paragraph::new(message)
+                .style(Style::default().fg(if overlay.error.is_some() {
+                    Color::Red
+                } else {
+                    Color::White
+                }))
+                .block(block),
+            area,
+        );
+        return;
+    }
+
+    let items: Vec<ListItem> = overlay
+        .tasks
+        .iter()
+        .map(|task| {
+            let label = match &task.reference {
+                Some(reference) => format!("[{reference}] {}", task.title),
+                None => task.title.clone(),
+            };
+            ListItem::new(label).style(Style::default().fg(Color::White))
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(overlay.selected);
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 pub fn render_taskwarrior_overlay(frame: &mut Frame, app: &App, body: Rect) {

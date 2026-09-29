@@ -1,4 +1,4 @@
-use crate::config::TokiConfig;
+use crate::config::{TaskManager, TokiConfig};
 use crate::time_utils::to_local_time;
 use crate::types::{Activity, Project, TimeEntry};
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -13,9 +13,9 @@ mod navigation;
 mod state;
 pub use history::parse_date_str;
 pub use state::{
-    DailyProjectStat, DayStat, DeleteContext, DeleteOrigin, EntryEditField, EntryEditState,
-    FocusedBox, GitContext, ProjectStat, SaveAction, TaskEntry, TaskwarriorOverlay, TextInput,
-    TimerSize, TimerState, View,
+    AvenOverlay, DailyProjectStat, DayStat, DeleteContext, DeleteOrigin, EntryEditField,
+    EntryEditState, FocusedBox, GitContext, ProjectStat, SaveAction, TaskEntry, TaskwarriorOverlay,
+    TextInput, TimerSize, TimerState, View,
 };
 
 pub struct App {
@@ -88,6 +88,8 @@ pub struct App {
     pub cwd_input: Option<TextInput>, // Some(_) when changing directory
     pub cwd_completions: Vec<String>, // Tab completion candidates
     pub taskwarrior_overlay: Option<TaskwarriorOverlay>,
+    pub aven_overlay: Option<AvenOverlay>,
+    aven_next_request: u64,
 
     // Loading indicator
     pub is_loading: bool,
@@ -107,6 +109,7 @@ pub struct App {
 
     // Config values used at runtime
     pub task_filter: String,
+    pub task_manager: TaskManager,
     pub git_default_prefix: String,
     pub auto_resize_timer: bool,
 
@@ -183,6 +186,8 @@ impl App {
             cwd_input: None,
             cwd_completions: Vec::new(),
             taskwarrior_overlay: None,
+            aven_overlay: None,
+            aven_next_request: 0,
             is_loading: false,
             throbber_state: throbber_widgets_tui::ThrobberState::default(),
             scheduled_hours_per_week: 40.0,
@@ -191,6 +196,7 @@ impl App {
             weekly_stats_cache: Vec::new(),
             weekly_daily_stats_cache: Vec::new(),
             task_filter: cfg.task_filter.clone(),
+            task_manager: cfg.task_manager,
             git_default_prefix: cfg.git_default_prefix.clone(),
             auto_resize_timer: cfg.auto_resize_timer,
             templates: cfg.template.clone(),
@@ -592,9 +598,7 @@ impl App {
     /// Get contextual status message
     pub fn get_contextual_status(&self) -> String {
         match self.timer_state {
-            TimerState::Stopped => {
-                "No timer active (press Space/Ctrl+K to start a new timer)".to_string()
-            }
+            TimerState::Stopped => "No timer active (press Space to start a new timer)".to_string(),
             TimerState::Running => {
                 if self.has_project_activity() {
                     "Timer active (press Space or Ctrl+S to save, Ctrl+X to clear)".to_string()
@@ -1136,6 +1140,71 @@ impl App {
         }
     }
 
+    pub fn open_aven_overlay(&mut self) -> (u64, std::path::PathBuf) {
+        self.aven_next_request = self.aven_next_request.wrapping_add(1);
+        self.aven_overlay = Some(AvenOverlay {
+            loading: true,
+            request_id: self.aven_next_request,
+            ..Default::default()
+        });
+        (self.aven_next_request, self.git_context.cwd.clone())
+    }
+
+    pub fn finish_aven_load(
+        &mut self,
+        request_id: u64,
+        result: Result<Vec<crate::aven::AvenTask>, String>,
+    ) {
+        let Some(overlay) = self.aven_overlay.as_mut() else {
+            return;
+        };
+        if overlay.request_id != request_id {
+            return;
+        }
+        overlay.loading = false;
+        match result {
+            Ok(tasks) => {
+                overlay.selected = (!tasks.is_empty()).then_some(0);
+                overlay.tasks = tasks;
+            }
+            Err(error) => overlay.error = Some(error),
+        }
+    }
+
+    pub fn close_aven_overlay(&mut self) {
+        self.aven_overlay = None;
+    }
+
+    pub fn aven_move(&mut self, down: bool) {
+        if let Some(overlay) = &mut self.aven_overlay {
+            if overlay.tasks.is_empty() {
+                return;
+            }
+            overlay.selected = Some(match overlay.selected {
+                None => 0,
+                Some(i) if down => (i + 1).min(overlay.tasks.len() - 1),
+                Some(i) => i.saturating_sub(1),
+            });
+        }
+    }
+
+    pub fn aven_confirm(&mut self) {
+        let title = self
+            .aven_overlay
+            .as_ref()
+            .and_then(|o| o.selected.and_then(|i| o.tasks.get(i)))
+            .map(|task| task.title.clone());
+        self.aven_overlay = None;
+        if let Some(title) = title {
+            if !self.description_input.value.is_empty() {
+                self.description_input.insert(' ');
+            }
+            for c in title.chars() {
+                self.description_input.insert(c);
+            }
+        }
+    }
+
     pub fn open_taskwarrior_overlay(&mut self) {
         let mut cmd = std::process::Command::new("task");
         cmd.arg("rc.verbose=nothing");
@@ -1273,6 +1342,59 @@ fn longest_common_prefix(strings: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::test_support::{activity, project, test_app, time_entry};
+
+    #[test]
+    fn aven_picker_inserts_title_only_and_ignores_stale_results() {
+        let mut app = test_app();
+        app.description_input = TextInput::from_str("Existing note");
+        let (old_request, _) = app.open_aven_overlay();
+        app.close_aven_overlay();
+        let (request, _) = app.open_aven_overlay();
+        app.finish_aven_load(
+            old_request,
+            Ok(vec![crate::aven::AvenTask {
+                title: "Stale".to_string(),
+                reference: None,
+            }]),
+        );
+        assert!(app.aven_overlay.as_ref().unwrap().loading);
+        app.finish_aven_load(
+            request,
+            Ok(vec![
+                crate::aven::AvenTask {
+                    title: "First task".to_string(),
+                    reference: Some("CHL-X30D".to_string()),
+                },
+                crate::aven::AvenTask {
+                    title: "Second task".to_string(),
+                    reference: Some("CHL-X30E".to_string()),
+                },
+            ]),
+        );
+        app.aven_move(true);
+        app.aven_confirm();
+        assert_eq!(app.description_input.value, "Existing note Second task");
+        assert!(app.aven_overlay.is_none());
+    }
+
+    #[test]
+    fn canceled_or_failed_aven_picker_preserves_note() {
+        let mut app = test_app();
+        app.description_input = TextInput::from_str("Unchanged");
+        let (request, _) = app.open_aven_overlay();
+        app.finish_aven_load(request, Err("Aven unavailable".to_string()));
+        app.aven_confirm();
+        assert_eq!(app.description_input.value, "Unchanged");
+    }
+
+    #[test]
+    fn stopped_timer_status_only_advertises_supported_start_key() {
+        let app = test_app();
+        assert_eq!(
+            app.get_contextual_status(),
+            "No timer active (press Space to start a new timer)"
+        );
+    }
 
     #[test]
     fn start_timer_sets_running_state_and_shifts_focus() {

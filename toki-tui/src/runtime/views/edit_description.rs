@@ -1,4 +1,5 @@
 use crate::app::{self, App};
+use crate::config::TaskManager;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::super::action_queue::{Action, ActionTx};
@@ -34,6 +35,19 @@ pub(super) fn handle_edit_description_key(key: KeyEvent, app: &mut App, action_t
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.cwd_input_char(c);
             }
+            _ => {}
+        }
+    } else if app.aven_overlay.is_some() {
+        match key.code {
+            KeyCode::Esc => app.close_aven_overlay(),
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                app.close_aven_overlay();
+            }
+            KeyCode::Down | KeyCode::Char('j') => app.aven_move(true),
+            KeyCode::Up | KeyCode::Char('k') => app.aven_move(false),
+            KeyCode::Enter => app.aven_confirm(),
             _ => {}
         }
     } else if app.taskwarrior_overlay.is_some() {
@@ -82,9 +96,17 @@ pub(super) fn handle_edit_description_key(key: KeyEvent, app: &mut App, action_t
                 app.begin_cwd_change();
             }
             KeyCode::Char('t') | KeyCode::Char('T')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && app.task_manager == TaskManager::Taskwarrior =>
             {
                 app.open_taskwarrior_overlay();
+            }
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && app.task_manager == TaskManager::Aven =>
+            {
+                let (request_id, cwd) = app.open_aven_overlay();
+                enqueue_action(action_tx, Action::LoadAvenTasks { request_id, cwd });
             }
             KeyCode::Char('r') | KeyCode::Char('R')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -205,6 +227,68 @@ mod tests {
             Some(other) => panic!("unexpected action: {other:?}"),
             None => panic!("expected queued action"),
         }
+    }
+
+    #[test]
+    fn ctrl_a_opens_aven_and_escape_cancels_without_changing_note() {
+        let mut app = test_app();
+        app.task_manager = crate::config::TaskManager::Aven;
+        app.description_input = TextInput::from_str("Working");
+        let (tx, mut rx) = channel();
+        handle_edit_description_key(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            &mut app,
+            &tx,
+        );
+        let request = app.aven_overlay.as_ref().unwrap().request_id;
+        assert!(
+            matches!(rx.try_recv(), Ok(Action::LoadAvenTasks { request_id, .. }) if request_id == request)
+        );
+        handle_edit_description_key(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            &mut app,
+            &tx,
+        );
+        assert!(app.aven_overlay.is_none());
+        assert_eq!(app.description_input.value, "Working");
+    }
+
+    #[test]
+    fn unconfigured_task_pickers_ignore_both_shortcuts() {
+        let mut app = test_app();
+        assert_eq!(app.task_manager, crate::config::TaskManager::None);
+        let (tx, mut rx) = channel();
+        for key in ['a', 't'] {
+            handle_edit_description_key(
+                KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL),
+                &mut app,
+                &tx,
+            );
+        }
+        assert!(app.aven_overlay.is_none());
+        assert!(app.taskwarrior_overlay.is_none());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn selected_manager_disables_the_other_picker() {
+        let mut app = test_app();
+        let (tx, mut rx) = channel();
+        app.task_manager = crate::config::TaskManager::Aven;
+        handle_edit_description_key(
+            KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+            &mut app,
+            &tx,
+        );
+        assert!(app.taskwarrior_overlay.is_none());
+        app.task_manager = crate::config::TaskManager::Taskwarrior;
+        handle_edit_description_key(
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            &mut app,
+            &tx,
+        );
+        assert!(app.aven_overlay.is_none());
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

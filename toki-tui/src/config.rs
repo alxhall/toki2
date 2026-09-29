@@ -10,6 +10,15 @@ pub struct TemplateConfig {
     pub note: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskManager {
+    #[default]
+    None,
+    Aven,
+    Taskwarrior,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokiConfig {
     /// URL of the toki-api server. Defaults to the production instance.
@@ -19,6 +28,9 @@ pub struct TokiConfig {
     /// Leave empty to show all pending tasks.
     #[serde(default)]
     pub task_filter: String,
+    /// Optional task picker for note editing. Disabled unless explicitly selected.
+    #[serde(default)]
+    pub task_manager: TaskManager,
     /// Prefix used when converting a git branch name to a time entry note
     /// when no conventional commit prefix or ticket number is found.
     #[serde(default = "default_git_prefix")]
@@ -49,10 +61,39 @@ impl Default for TokiConfig {
         Self {
             api_url: default_api_url(),
             task_filter: String::new(),
+            task_manager: TaskManager::None,
             git_default_prefix: default_git_prefix(),
             auto_resize_timer: default_auto_resize_timer(),
             template: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_manager_defaults_to_none_and_rejects_unknown_values() {
+        let defaults: TokiConfig = toml::from_str("").unwrap();
+        assert_eq!(defaults.task_manager, TaskManager::None);
+        assert_eq!(TokiConfig::default().task_manager, TaskManager::None);
+        assert!(toml::to_string_pretty(&TokiConfig::default())
+            .unwrap()
+            .contains("task_manager = \"none\""));
+        assert_eq!(
+            toml::from_str::<TokiConfig>("task_manager = 'aven'")
+                .unwrap()
+                .task_manager,
+            TaskManager::Aven
+        );
+        assert_eq!(
+            toml::from_str::<TokiConfig>("task_manager = 'taskwarrior'")
+                .unwrap()
+                .task_manager,
+            TaskManager::Taskwarrior
+        );
+        assert!(toml::from_str::<TokiConfig>("task_manager = 'both'").is_err());
     }
 }
 
@@ -88,6 +129,7 @@ impl TokiConfig {
         let settings = config::Config::builder()
             .set_default("api_url", default_api_url())?
             .set_default("task_filter", "")?
+            .set_default("task_manager", "none")?
             .set_default("git_default_prefix", default_git_prefix())?
             .set_default("auto_resize_timer", default_auto_resize_timer())?
             .add_source(config::File::from(path.clone()).required(false))

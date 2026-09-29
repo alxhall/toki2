@@ -59,7 +59,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             template_selection_view::render_template_selection(frame, app, body)
         }
         View::EditDescription => {
-            if app.taskwarrior_overlay.is_some() {
+            if app.aven_overlay.is_some() {
+                description_editor::render_aven_overlay(frame, app, body);
+            } else if app.taskwarrior_overlay.is_some() {
                 description_editor::render_taskwarrior_overlay(frame, app, body);
             } else {
                 description_editor::render_description_editor(frame, app, body);
@@ -74,10 +76,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{FocusedBox, TimerState};
-    use crate::test_support::{activity, project, test_app};
+    use crate::test_support::test_app;
     use ratatui::{backend::TestBackend, Terminal};
-    use time::macros::datetime;
 
     fn render_lines(app: &mut App) -> Vec<String> {
         let backend = TestBackend::new(100, 30);
@@ -100,6 +100,62 @@ mod tests {
 
     fn rendered_text(app: &mut App) -> String {
         render_lines(app).join("\n")
+    }
+
+    #[test]
+    fn header_displays_muted_binary_version() {
+        let mut app = test_app();
+        let mut terminal = Terminal::new(TestBackend::new(160, 30)).unwrap();
+        terminal.draw(|frame| render(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let line: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 1)].symbol())
+            .collect();
+        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let x = line.find(&version).expect("version beside title") as u16;
+        assert!(line[..x as usize].ends_with("Toki Timer TUI "));
+        assert_eq!(buffer[(x, 1)].fg, Color::DarkGray);
+    }
+
+    #[test]
+    fn note_editor_shows_only_configured_task_shortcut() {
+        for (manager, shows_aven, shows_taskwarrior) in [
+            (crate::config::TaskManager::None, false, false),
+            (crate::config::TaskManager::Aven, true, false),
+            (crate::config::TaskManager::Taskwarrior, false, true),
+        ] {
+            let mut app = test_app();
+            app.task_manager = manager;
+            app.navigate_to(View::EditDescription);
+            let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
+            terminal.draw(|frame| render(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text: String = (0..buffer.area.height)
+                .flat_map(|y| {
+                    (0..buffer.area.width).map(move |x| buffer[(x, y)].symbol().to_string())
+                })
+                .collect();
+            assert_eq!(text.contains("Ctrl+A"), shows_aven);
+            assert_eq!(text.contains("Ctrl+T"), shows_taskwarrior);
+        }
+    }
+
+    #[test]
+    fn aven_picker_renders_titles_and_loading_without_task_metadata() {
+        let mut app = test_app();
+        app.navigate_to(View::EditDescription);
+        let (request, _) = app.open_aven_overlay();
+        assert!(rendered_text(&mut app).contains("Loading Aven tasks"));
+        app.finish_aven_load(
+            request,
+            Ok(vec![crate::aven::AvenTask {
+                title: "Fixture title".to_string(),
+                reference: Some("CHL-X30D".to_string()),
+            }]),
+        );
+        let text = rendered_text(&mut app);
+        assert!(text.contains("Aven Tasks"));
+        assert!(text.contains("[CHL-X30D] Fixture title"));
     }
 
     #[test]

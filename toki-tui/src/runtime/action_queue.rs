@@ -31,6 +31,10 @@ pub(super) enum Action {
     ApplyTemplate {
         template: crate::config::TemplateConfig,
     },
+    LoadAvenTasks {
+        request_id: u64,
+        cwd: std::path::PathBuf,
+    },
     OpenLogNote,
     OpenEntryLogNote(String),
 }

@@ -525,10 +525,19 @@ pub fn render_compact_stats(frame: &mut Frame, area: Rect, app: &mut App) {
     let flex_sign = if flex >= 0.0 { " +" } else { " -" };
     let flex_str = format!("{}{}h:{:02}m ", flex_sign, flex_h, flex_m);
 
-    // Column widths: throbber (1 char) + " Toki Timer TUI"
+    // Prefer the existing stats and gauge to the version on narrow terminals.
     const LABEL: &str = " Toki Timer TUI";
-    let title_width = 1 + LABEL.len() as u16 + 1; // leading space + symbol + label
+    const VERSION: &str = concat!(" v", env!("CARGO_PKG_VERSION"));
+    let base_title_width = 1 + LABEL.len() as u16 + 1; // leading space + symbol + label
     let flex_col_width = 3 + "Flex:".len() as u16 + flex_str.len() as u16; // " | " + "Flex:" + value
+    let show_version =
+        area.width >= base_title_width + VERSION.len() as u16 + stats_width + flex_col_width + 10;
+    let title_width = base_title_width
+        + if show_version {
+            VERSION.len() as u16
+        } else {
+            0
+        };
 
     let cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -563,10 +572,11 @@ pub fn render_compact_stats(frame: &mut Frame, area: Rect, app: &mut App) {
             throbber_widgets_tui::WhichUse::Full
         });
     frame.render_stateful_widget(throbber, throbber_area, &mut app.throbber_state);
-    frame.render_widget(
-        Paragraph::new(Span::styled(LABEL, Style::default().fg(Color::Yellow))),
-        label_area,
-    );
+    let mut title = vec![Span::styled(LABEL, Style::default().fg(Color::Yellow))];
+    if show_version {
+        title.push(Span::styled(VERSION, Style::default().fg(Color::DarkGray)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(title)), label_area);
     let (gauge_col, stats_col, flex_col) = (cols[1], cols[2], cols[3]);
 
     // --- LineGauge (no default label) ---
